@@ -14,6 +14,9 @@ export default function EvaluationsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [weekFilter, setWeekFilter] = useState('')
   const [internFilter, setInternFilter] = useState('')
+  const [scoreMinFilter, setScoreMinFilter] = useState('')
+  const [scoreMaxFilter, setScoreMaxFilter] = useState('')
+  const [sortBy, setSortBy] = useState('newest') // newest, oldest, week_asc, week_desc, score_asc, score_desc, intern_asc, intern_desc
   
   // Edit Evaluation states (Admin and Technical Lead)
   const [editingEvaluation, setEditingEvaluation] = useState(null)
@@ -28,18 +31,64 @@ export default function EvaluationsPage() {
 
   const internMap = useMemo(() => Object.fromEntries(interns.map((intern) => [intern.id, intern])), [interns])
 
-  // Filter evaluations based on search and filters
-  const filteredEvaluations = useMemo(() => {
-    return evaluations.filter((item) => {
+  // Filter and sort evaluations based on search, filters, and sorting
+  const filteredAndSortedEvaluations = useMemo(() => {
+    // Step 1: Filter
+    let filtered = evaluations.filter((item) => {
       const internName = internMap[item.intern_id]?.name || ''
+      
+      // Search: intern name, feedback, or week number
       const matchesSearch = !searchQuery || 
         internName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.feedback && item.feedback.toLowerCase().includes(searchQuery.toLowerCase()))
+        (item.feedback && item.feedback.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        String(item.week_number).includes(searchQuery)
+      
+      // Week filter
       const matchesWeek = !weekFilter || item.week_number === Number(weekFilter)
+      
+      // Intern filter
       const matchesIntern = !internFilter || item.intern_id === internFilter
-      return matchesSearch && matchesWeek && matchesIntern
+      
+      // Score range filter
+      const matchesScoreMin = !scoreMinFilter || item.score >= Number(scoreMinFilter)
+      const matchesScoreMax = !scoreMaxFilter || item.score <= Number(scoreMaxFilter)
+      
+      return matchesSearch && matchesWeek && matchesIntern && matchesScoreMin && matchesScoreMax
     })
-  }, [evaluations, searchQuery, weekFilter, internFilter, internMap])
+    
+    // Step 2: Sort
+    const sorted = [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case 'newest':
+          // Assuming evaluations have created_at or id for ordering
+          return b.id - a.id
+        case 'oldest':
+          return a.id - b.id
+        case 'week_asc':
+          return a.week_number - b.week_number
+        case 'week_desc':
+          return b.week_number - a.week_number
+        case 'score_asc':
+          return a.score - b.score
+        case 'score_desc':
+          return b.score - a.score
+        case 'intern_asc': {
+          const nameA = internMap[a.intern_id]?.name || ''
+          const nameB = internMap[b.intern_id]?.name || ''
+          return nameA.localeCompare(nameB)
+        }
+        case 'intern_desc': {
+          const nameA = internMap[a.intern_id]?.name || ''
+          const nameB = internMap[b.intern_id]?.name || ''
+          return nameB.localeCompare(nameA)
+        }
+        default:
+          return 0
+      }
+    })
+    
+    return sorted
+  }, [evaluations, searchQuery, weekFilter, internFilter, scoreMinFilter, scoreMaxFilter, sortBy, internMap])
 
   async function load() {
     if (!user?.id) return
@@ -184,8 +233,21 @@ This action cannot be undone.`)) {
     }
   }, [evaluations, editingEvaluation]);
 
+  // Clear all filters and reset to default view
+  function clearFilters() {
+    setSearchQuery('')
+    setWeekFilter('')
+    setInternFilter('')
+    setScoreMinFilter('')
+    setScoreMaxFilter('')
+    setSortBy('newest')
+  }
+
+  // Check if any filters are active
+  const hasActiveFilters = searchQuery || weekFilter || internFilter || scoreMinFilter || scoreMaxFilter || sortBy !== 'newest'
+
   async function downloadCSV() {
-    if (filteredEvaluations.length === 0) {
+    if (filteredAndSortedEvaluations.length === 0) {
       setError('No evaluations to download. Please adjust your filters.')
       return
     }
@@ -334,16 +396,31 @@ This action cannot be undone.`)) {
         </button>
       </form>
 
-      {/* 2. Search and Filters */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Search & Filter Evaluations</h2>
-        <div className="grid md:grid-cols-3 gap-4">
+      {/* 2. Search, Filters, and Sorting */}
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Search, Filter & Sort Evaluations</h2>
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="px-3 py-1.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-md transition-all duration-200 flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Clear All
+            </button>
+          )}
+        </div>
+        
+        {/* Search and Basic Filters */}
+        <div className="grid md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Search</label>
             <input
               type="text"
               className="input"
-              placeholder="Search by intern name or feedback..."
+              placeholder="Name, feedback, week..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -359,17 +436,66 @@ This action cannot be undone.`)) {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Filter by Week</label>
+            <select className="input" value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)}>
+              <option value="">All Weeks</option>
+              {availableWeeks.map((week) => (
+                <option key={week} value={week}>Week {week}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Sort By</label>
+            <select className="input" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="week_desc">Week (High to Low)</option>
+              <option value="week_asc">Week (Low to High)</option>
+              <option value="score_desc">Score (High to Low)</option>
+              <option value="score_asc">Score (Low to High)</option>
+              <option value="intern_asc">Intern (A to Z)</option>
+              <option value="intern_desc">Intern (Z to A)</option>
+            </select>
+          </div>
+        </div>
+        
+        {/* Score Range Filter */}
+        <div className="grid md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Minimum Score</label>
             <input
               type="number"
               className="input"
-              placeholder="Week number..."
-              value={weekFilter}
-              onChange={(e) => setWeekFilter(e.target.value)}
-              min="1"
-              max="52"
+              placeholder="e.g., 3.0"
+              value={scoreMinFilter}
+              onChange={(e) => setScoreMinFilter(e.target.value)}
+              min="0"
+              max="5"
+              step="0.1"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Maximum Score</label>
+            <input
+              type="number"
+              className="input"
+              placeholder="e.g., 5.0"
+              value={scoreMaxFilter}
+              onChange={(e) => setScoreMaxFilter(e.target.value)}
+              min="0"
+              max="5"
+              step="0.1"
             />
           </div>
         </div>
+        
+        {/* Active Filters Summary */}
+        {hasActiveFilters && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-xs text-blue-700">
+              <span className="font-semibold">🔍 Active Filters:</span> Showing {filteredAndSortedEvaluations.length} of {evaluations.length} evaluations
+            </p>
+          </div>
+        )}
       </div>
 
       {/* CSV Download Section */}
@@ -413,7 +539,7 @@ This action cannot be undone.`)) {
           <div className="flex items-end">
             <button
               onClick={downloadCSV}
-              disabled={downloadLoading || filteredEvaluations.length === 0}
+              disabled={downloadLoading || filteredAndSortedEvaluations.length === 0}
               className="btn-primary w-full disabled:bg-slate-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {downloadLoading ? (
@@ -446,19 +572,48 @@ This action cannot be undone.`)) {
 
       {/* 3. Evaluations Table (BOTTOM) */}
       <div className="card overflow-x-auto">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">All Evaluations</h2>
-        <table className="table">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="th">Intern</th>
-              <th className="th">Week</th>
-              <th className="th">Score</th>
-              <th className="th">Feedback</th>
-              {(user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD') && <th className="th">Actions</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredEvaluations.map((item) => (
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-900">
+            All Evaluations
+            <span className="ml-2 text-sm font-normal text-slate-500">
+              ({filteredAndSortedEvaluations.length} {filteredAndSortedEvaluations.length === 1 ? 'result' : 'results'})
+            </span>
+          </h2>
+        </div>
+        
+        {filteredAndSortedEvaluations.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="text-4xl mb-3">📊</div>
+            <p className="text-slate-600 font-medium mb-2">
+              {evaluations.length === 0 ? 'No evaluations recorded yet' : 'No evaluations match your filters'}
+            </p>
+            <p className="text-sm text-slate-400 mb-4">
+              {evaluations.length === 0 
+                ? 'Start by recording your first evaluation above.' 
+                : 'Try adjusting your search or filter criteria.'}
+            </p>
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-700 hover:to-cyan-800 rounded-md shadow-sm transition-all duration-200"
+              >
+                Clear All Filters
+              </button>
+            )}
+          </div>
+        ) : (
+          <table className="table">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="th">Intern</th>
+                <th className="th">Week</th>
+                <th className="th">Score</th>
+                <th className="th">Feedback</th>
+                {(user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD') && <th className="th">Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredAndSortedEvaluations.map((item) => (
               <tr key={item.id}>
                 <td className="td">{internMap[item.intern_id]?.name || item.intern_id}</td>
                 <td className="td">{item.week_number}</td>
@@ -481,12 +636,10 @@ This action cannot be undone.`)) {
                   </td>
                 )}
               </tr>
-            ))}
-            {filteredEvaluations.length === 0 && (
-              <tr><td className="td text-slate-500" colSpan={(user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD') ? 5 : 4}>No evaluations found.</td></tr>
-            )}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Edit Evaluation Modal (Admin and Technical Lead) */}

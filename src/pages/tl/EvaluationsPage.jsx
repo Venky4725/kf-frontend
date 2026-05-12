@@ -15,6 +15,12 @@ export default function EvaluationsPage() {
   const [weekFilter, setWeekFilter] = useState('')
   const [internFilter, setInternFilter] = useState('')
   
+  // Edit Evaluation states (Admin and Technical Lead)
+  const [editingEvaluation, setEditingEvaluation] = useState(null)
+  const [editForm, setEditForm] = useState({ score: '', feedback: '', week_number: '' })
+  const [editError, setEditError] = useState('')
+  const [editLoading, setEditLoading] = useState(false)
+
   // CSV download states
   const [downloadLoading, setDownloadLoading] = useState(false)
   const [selectedInterns, setSelectedInterns] = useState([])
@@ -38,6 +44,8 @@ export default function EvaluationsPage() {
   async function load() {
     if (!user?.id) return
     
+    let isMounted = true; // Flag for cleanup
+
     try {
       const [profiles, batches, evaluationList] = await Promise.all([
         api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
@@ -50,23 +58,35 @@ export default function EvaluationsPage() {
         }),
       ])
 
-      if (user?.role === 'TECHNICAL_LEAD') {
-        const allowedBatchIds = new Set((batches.data || []).map((batch) => batch.id))
-        setInterns((profiles.data || []).filter((intern) => allowedBatchIds.has(intern.batch_id)))
-      } else {
-        setInterns(profiles.data || [])
+      if (isMounted) {
+        if (user?.role === 'TECHNICAL_LEAD') {
+          const allowedBatchIds = new Set((batches.data || []).map((batch) => batch.id))
+          setInterns((profiles.data || []).filter((intern) => allowedBatchIds.has(intern.batch_id)))
+        } else {
+          setInterns(profiles.data || [])
+        }
+        setEvaluations(evaluationList.data || [])
+        setError('')
       }
-      setEvaluations(evaluationList.data || [])
-      setError('')
     } catch (err) {
-      console.error('Failed to load evaluations:', err)
-      setError(err.response?.data?.detail || 'Failed to load evaluations.')
-      setInterns([])
-      setEvaluations([])
+      if (isMounted) {
+        console.error('Failed to load evaluations:', err)
+        setError(err.response?.data?.detail || 'Failed to load evaluations.')
+        setInterns([])
+        setEvaluations([])
+      }
     }
+    
+    return () => {
+      isMounted = false; // Cleanup function
+    };
   }
 
-  useEffect(() => { load() }, [user])
+  useEffect(() => {
+    const cleanup = load();
+    // Ensure cleanup function is called on component unmount
+    return () => cleanup(); 
+  }, [user]);
 
   async function createEvaluation(event) {
     event.preventDefault()
@@ -91,23 +111,78 @@ export default function EvaluationsPage() {
     }
   }
 
+  function openEditModal(evaluation) {
+    setEditingEvaluation(evaluation)
+    setEditForm({
+      score: evaluation.score,
+      feedback: evaluation.feedback || '',
+      week_number: evaluation.week_number
+    })
+    setEditError('')
+  }
+
+  function closeEditModal() {
+    setEditingEvaluation(null)
+    setEditForm({ score: '', feedback: '', week_number: '' })
+    setEditError('')
+  }
+
+  async function updateEvaluation(event) {
+    event.preventDefault()
+    if (!editingEvaluation) return
+
+    setEditLoading(true)
+    setEditError('')
+
+    try {
+      // Build payload based on role
+      const payload = {
+        score: Number(editForm.score),
+        feedback: editForm.feedback,
+        week_number: Number(editForm.week_number)
+      }
+      
+      // ADMIN can update all fields, TECHNICAL_LEAD is restricted by backend
+      await api.put(`/evaluations/${editingEvaluation.id}`, payload)
+      closeEditModal()
+      load() // refresh the list
+    } catch (err) {
+      console.error('Failed to update evaluation:', err)
+      setEditError(err.response?.data?.detail || 'Failed to update evaluation.')
+    } finally {
+      setEditLoading(false)
+    }
+  }
+
   async function deleteEvaluation(evaluationId, internName, weekNumber) {
-    if (!window.confirm(`Delete evaluation for ${internName} (Week ${weekNumber})?\n\nThis action cannot be undone.`)) {
+    if (!window.confirm(`Delete evaluation for ${internName} (Week ${weekNumber})?
+
+This action cannot be undone.`)) {
       return
     }
     
     try {
+      // Backend enforces batch restrictions for TECHNICAL_LEAD
       await api.delete(`/evaluations/${evaluationId}`)
       setError('')
       load()
     } catch (err) {
+      console.error('Failed to delete evaluation:', err)
       if (err.response?.status === 403) {
-        setError('You can only manage resources in your assigned batches.')
+        setError('Access denied: You can only delete evaluations for interns in your assigned batches.')
       } else {
         setError(err.response?.data?.detail || 'Failed to delete evaluation.')
       }
     }
   }
+
+  // Effect to close modal if the edited evaluation is no longer in the list after a refresh
+  useEffect(() => {
+    if (editingEvaluation && !evaluations.some(e => e.id === editingEvaluation.id)) {
+      console.warn("Editing evaluation no longer found, closing modal.");
+      closeEditModal();
+    }
+  }, [evaluations, editingEvaluation]);
 
   async function downloadCSV() {
     if (filteredEvaluations.length === 0) {
@@ -379,7 +454,7 @@ export default function EvaluationsPage() {
               <th className="th">Week</th>
               <th className="th">Score</th>
               <th className="th">Feedback</th>
-              {user?.role === 'ADMIN' && <th className="th">Actions</th>}
+              {(user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD') && <th className="th">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -389,8 +464,14 @@ export default function EvaluationsPage() {
                 <td className="td">{item.week_number}</td>
                 <td className="td font-semibold">{item.score}</td>
                 <td className="td">{item.feedback || '—'}</td>
-                {user?.role === 'ADMIN' && (
-                  <td className="td">
+                {(user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD') && (
+                  <td className="td space-x-2">
+                    <button
+                      onClick={() => openEditModal(item)}
+                      className="px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-all duration-200"
+                    >
+                      Edit
+                    </button>
                     <button
                       onClick={() => deleteEvaluation(item.id, internMap[item.intern_id]?.name || 'Unknown', item.week_number)}
                       className="px-3 py-1.5 text-sm font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-all duration-200"
@@ -402,11 +483,99 @@ export default function EvaluationsPage() {
               </tr>
             ))}
             {filteredEvaluations.length === 0 && (
-              <tr><td className="td text-slate-500" colSpan={user?.role === 'ADMIN' ? 5 : 4}>No evaluations found.</td></tr>
+              <tr><td className="td text-slate-500" colSpan={(user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD') ? 5 : 4}>No evaluations found.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Edit Evaluation Modal (Admin and Technical Lead) */}
+      {editingEvaluation && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Edit Evaluation</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Updating evaluation for <span className="font-semibold">{internMap[editingEvaluation.intern_id]?.name || 'Unknown'}</span> (Week {editingEvaluation.week_number})
+            </p>
+            
+            {user?.role === 'TECHNICAL_LEAD' && (
+              <div className="mb-4 p-3 rounded bg-blue-50 border border-blue-200 text-blue-700 text-sm">
+                <span className="font-semibold">ℹ️ Note:</span> You can only edit/delete evaluations for interns in your assigned batches. You can modify week number, score, and feedback only.
+              </div>
+            )}
+            
+            {editError && (
+              <div className="mb-4 p-3 rounded bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+                {editError}
+              </div>
+            )}
+
+            <form onSubmit={updateEvaluation} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Week Number *
+                  </label>
+                  <input 
+                    className="input" 
+                    type="number" 
+                    min="1" 
+                    max="52" 
+                    value={editForm.week_number} 
+                    onChange={(e) => setEditForm({ ...editForm, week_number: e.target.value })} 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Score (0-5) *
+                  </label>
+                  <input 
+                    className="input" 
+                    type="number" 
+                    min="0" 
+                    max="5" 
+                    step="0.1" 
+                    value={editForm.score} 
+                    onChange={(e) => setEditForm({ ...editForm, score: e.target.value })} 
+                    required 
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Feedback (Optional)
+                </label>
+                <textarea 
+                  className="input min-h-[80px] resize-y" 
+                  value={editForm.feedback} 
+                  onChange={(e) => setEditForm({ ...editForm, feedback: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors"
+                  disabled={editLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary disabled:opacity-50"
+                  disabled={editLoading}
+                >
+                  {editLoading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

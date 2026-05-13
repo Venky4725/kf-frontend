@@ -259,13 +259,12 @@ export default function AttendanceAdmin() {
 
   const hasActiveFilters = searchQuery || batchFilter || statusFilter
 
-  // Get status badge styling - UPDATED WITH ALL STATUSES
+  // Get status badge styling
   const getStatusBadge = (status) => {
     const styles = {
       present: 'bg-green-100 text-green-700 border-green-300',
       absent: 'bg-rose-100 text-rose-700 border-rose-300',
       late: 'bg-amber-100 text-amber-700 border-amber-300',
-      leave: 'bg-blue-100 text-blue-700 border-blue-300',
     }
     return styles[status?.toLowerCase()] || 'bg-slate-100 text-slate-700 border-slate-300'
   }
@@ -573,7 +572,6 @@ export default function AttendanceAdmin() {
               <option value="present">Present</option>
               <option value="absent">Absent</option>
               <option value="late">Late</option>
-              <option value="leave">Leave</option>
             </select>
           </div>
         </div>
@@ -836,7 +834,6 @@ export default function AttendanceAdmin() {
                 <option value="present">Present</option>
                 <option value="absent">Absent</option>
                 <option value="late">Late</option>
-                <option value="leave">Leave</option>
               </select>
             </div>
             
@@ -1015,7 +1012,6 @@ export default function AttendanceAdmin() {
                   <option value="present">Present</option>
                   <option value="absent">Absent</option>
                   <option value="late">Late</option>
-                  <option value="leave">Leave</option>
                 </select>
               </div>
               

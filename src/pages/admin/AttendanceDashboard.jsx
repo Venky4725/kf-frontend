@@ -332,7 +332,6 @@ export default function AttendanceDashboard() {
     const presentToday = todayRecords.filter(r => r?.status?.toLowerCase() === 'present').length
     const absentToday = todayRecords.filter(r => r?.status?.toLowerCase() === 'absent').length
     const lateToday = todayRecords.filter(r => r?.status?.toLowerCase() === 'late').length
-    const leaveToday = todayRecords.filter(r => r?.status?.toLowerCase() === 'leave').length
     
     const attendancePercentage = totalInterns > 0 
       ? ((presentToday + lateToday) / totalInterns * 100).toFixed(1)
@@ -343,7 +342,6 @@ export default function AttendanceDashboard() {
       presentToday,
       absentToday,
       lateToday,
-      leaveToday,
       attendancePercentage
     }
   }, [filteredAttendanceData])
@@ -363,7 +361,6 @@ export default function AttendanceDashboard() {
           present: 0,
           absent: 0,
           late: 0,
-          leave: 0,
           total: 0
         }
       })
@@ -380,7 +377,6 @@ export default function AttendanceDashboard() {
           if (status === 'present') batchStatsMap[intern.batch_id].present++
           else if (status === 'absent') batchStatsMap[intern.batch_id].absent++
           else if (status === 'late') batchStatsMap[intern.batch_id].late++
-          else if (status === 'leave') batchStatsMap[intern.batch_id].leave++
           batchStatsMap[intern.batch_id].total++
         }
       })
@@ -402,9 +398,8 @@ export default function AttendanceDashboard() {
     const present = (filteredAttendanceData || []).filter(r => r?.status?.toLowerCase() === 'present').length
     const absent = (filteredAttendanceData || []).filter(r => r?.status?.toLowerCase() === 'absent').length
     const late = (filteredAttendanceData || []).filter(r => r?.status?.toLowerCase() === 'late').length
-    const leave = (filteredAttendanceData || []).filter(r => r?.status?.toLowerCase() === 'leave').length
     
-    const total = present + absent + late + leave
+    const total = present + absent + late
     
     return [
       { 
@@ -425,12 +420,6 @@ export default function AttendanceDashboard() {
         color: COLORS.late,
         percentage: total > 0 ? ((late / total) * 100).toFixed(1) : 0
       },
-      { 
-        name: 'Leave', 
-        value: leave, 
-        color: '#3b82f6',
-        percentage: total > 0 ? ((leave / total) * 100).toFixed(1) : 0
-      },
     ].filter(item => item.value > 0)
   }, [filteredAttendanceData])
 
@@ -448,14 +437,13 @@ export default function AttendanceDashboard() {
         if (!recordDate) return
         
         if (!dateStatsMap[recordDate]) {
-          dateStatsMap[recordDate] = { date: recordDate, present: 0, absent: 0, late: 0, leave: 0 }
+          dateStatsMap[recordDate] = { date: recordDate, present: 0, absent: 0, late: 0 }
         }
         
         const status = record.status?.toLowerCase()
         if (status === 'present') dateStatsMap[recordDate].present++
         else if (status === 'absent') dateStatsMap[recordDate].absent++
         else if (status === 'late') dateStatsMap[recordDate].late++
-        else if (status === 'leave') dateStatsMap[recordDate].leave++
       })
       
       return Object.values(dateStatsMap)
@@ -791,7 +779,6 @@ export default function AttendanceDashboard() {
               <option value="present">Present</option>
               <option value="absent">Absent</option>
               <option value="late">Late</option>
-              <option value="leave">Leave</option>
             </select>
           </div>
           <div>
@@ -861,7 +848,6 @@ export default function AttendanceDashboard() {
                   <Bar dataKey="present" fill={COLORS.present} name="Present" />
                   <Bar dataKey="absent" fill={COLORS.absent} name="Absent" />
                   <Bar dataKey="late" fill={COLORS.late} name="Late" />
-                  <Bar dataKey="leave" fill="#3b82f6" name="Leave" />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -933,10 +919,6 @@ export default function AttendanceDashboard() {
                       <stop offset="5%" stopColor={COLORS.late} stopOpacity={0.8}/>
                       <stop offset="95%" stopColor={COLORS.late} stopOpacity={0}/>
                     </linearGradient>
-                    <linearGradient id="colorLeave" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                    </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="formattedDate" tick={{ fontSize: 11 }} />
@@ -946,7 +928,6 @@ export default function AttendanceDashboard() {
                   <Area type="monotone" dataKey="present" stroke={COLORS.present} fillOpacity={1} fill="url(#colorPresent)" name="Present" />
                   <Area type="monotone" dataKey="absent" stroke={COLORS.absent} fillOpacity={1} fill="url(#colorAbsent)" name="Absent" />
                   <Area type="monotone" dataKey="late" stroke={COLORS.late} fillOpacity={1} fill="url(#colorLate)" name="Late" />
-                  <Area type="monotone" dataKey="leave" stroke="#3b82f6" fillOpacity={1} fill="url(#colorLeave)" name="Leave" />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (

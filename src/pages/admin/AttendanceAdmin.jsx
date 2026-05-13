@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import React, { useEffect, useState, useMemo, useCallback } from 'react'
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
 
@@ -21,6 +21,13 @@ export default function AttendanceAdmin() {
   const [batchFilter, setBatchFilter] = useState('')
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().split('T')[0])
   const [statusFilter, setStatusFilter] = useState('')
+  
+  // History filter states (separate from marking filters)
+  const [historyStartDate, setHistoryStartDate] = useState('')
+  const [historyEndDate, setHistoryEndDate] = useState('')
+  const [historyBatchFilter, setHistoryBatchFilter] = useState('')
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('')
+  const [historySearchQuery, setHistorySearchQuery] = useState('')
   
   // Edit/Delete states
   const [editingRecord, setEditingRecord] = useState(null)
@@ -287,17 +294,126 @@ export default function AttendanceAdmin() {
       }
     }).filter(Boolean) // Remove null entries
   }, [attendance, internMap, batchMap])
+  
+  // Filtered history records with separate controls
+  const filteredHistoryRecords = useMemo(() => {
+    console.log('=== FILTERING HISTORY RECORDS ===')
+    console.log('Total records:', enhancedAttendance.length)
+    console.log('History filters:', {
+      startDate: historyStartDate,
+      endDate: historyEndDate,
+      batch: historyBatchFilter,
+      status: historyStatusFilter,
+      search: historySearchQuery
+    })
+    
+    let filtered = [...enhancedAttendance]
+    
+    // Date range filter
+    if (historyStartDate || historyEndDate) {
+      filtered = filtered.filter(record => {
+        const recordDate = record.date
+        if (!recordDate || recordDate === 'N/A') return false
+        
+        const normalized = new Date(recordDate).toISOString().split('T')[0]
+        
+        if (historyStartDate && normalized < historyStartDate) return false
+        if (historyEndDate && normalized > historyEndDate) return false
+        
+        return true
+      })
+      console.log('After date filter:', filtered.length)
+    }
+    
+    // Batch filter
+    if (historyBatchFilter) {
+      filtered = filtered.filter(record => {
+        const batchId = record.batch_id
+        const filterBatchId = historyBatchFilter
+        
+        const matches = 
+          batchId === filterBatchId ||
+          String(batchId) === String(filterBatchId) ||
+          Number(batchId) === Number(filterBatchId)
+        
+        return matches
+      })
+      console.log('After batch filter:', filtered.length)
+    }
+    
+    // Status filter
+    if (historyStatusFilter) {
+      filtered = filtered.filter(record => {
+        return record.status?.toLowerCase() === historyStatusFilter.toLowerCase()
+      })
+      console.log('After status filter:', filtered.length)
+    }
+    
+    // Search filter
+    if (historySearchQuery && historySearchQuery.trim()) {
+      const searchTerm = historySearchQuery.trim().toLowerCase()
+      filtered = filtered.filter(record => {
+        const nameMatch = record.intern_name?.toLowerCase().includes(searchTerm)
+        const emailMatch = record.intern_email?.toLowerCase().includes(searchTerm)
+        const batchMatch = record.batch_name?.toLowerCase().includes(searchTerm)
+        
+        return nameMatch || emailMatch || batchMatch
+      })
+      console.log('After search filter:', filtered.length)
+    }
+    
+    console.log('Final filtered history:', filtered.length)
+    return filtered
+  }, [enhancedAttendance, historyStartDate, historyEndDate, historyBatchFilter, historyStatusFilter, historySearchQuery])
+  
+  // Clear history filters
+  const clearHistoryFilters = () => {
+    setHistoryStartDate('')
+    setHistoryEndDate('')
+    setHistoryBatchFilter('')
+    setHistoryStatusFilter('')
+    setHistorySearchQuery('')
+  }
+  
+  const hasHistoryFilters = historyStartDate || historyEndDate || historyBatchFilter || historyStatusFilter || historySearchQuery
 
-  // Filtered interns for marking attendance - FIXED: Hide already-marked interns
+  // Filtered interns for marking attendance - FIXED: Proper batch comparison
   const filteredInterns = useMemo(() => {
+    console.log('=== FILTERING INTERNS FOR MARKING ===')
+    console.log('Total interns:', interns.length)
+    console.log('batchFilter:', batchFilter, typeof batchFilter)
+    console.log('searchQuery:', searchQuery)
+    console.log('dateFilter:', dateFilter)
+    
     return interns.filter(intern => {
       if (!intern) return false
       
       // Apply search filter
-      if (searchQuery && !intern.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false
+      if (searchQuery) {
+        const matchesSearch = intern.name?.toLowerCase().includes(searchQuery.toLowerCase())
+        if (!matchesSearch) {
+          console.log('Filtered out by search:', intern.name)
+          return false
+        }
+      }
       
-      // Apply batch filter
-      if (batchFilter && intern.batch_id !== parseInt(batchFilter)) return false
+      // Apply batch filter - FIXED: Handle type coercion properly
+      if (batchFilter) {
+        const internBatchId = intern.batch_id
+        const filterBatchId = batchFilter
+        
+        // Try multiple comparison strategies
+        const exactMatch = internBatchId === filterBatchId
+        const stringMatch = String(internBatchId) === String(filterBatchId)
+        const numberMatch = Number(internBatchId) === Number(filterBatchId)
+        
+        const matches = exactMatch || stringMatch || numberMatch
+        
+        if (!matches) {
+          console.log('Filtered out by batch:', intern.name, 'intern.batch_id:', internBatchId, 'filter:', filterBatchId)
+          return false
+        }
+      }
       
       // Hide interns who already have attendance marked for selected date
       const hasAttendance = attendance.some(a => {
@@ -306,13 +422,31 @@ export default function AttendanceAdmin() {
       })
       
       // Only show interns without attendance for the selected date
-      if (hasAttendance) return false
+      if (hasAttendance) {
+        console.log('Already marked:', intern.name)
+        return false
+      }
       
       return true
     })
   }, [interns, searchQuery, batchFilter, attendance, dateFilter])
+  
+  // Log filtered results
+  React.useEffect(() => {
+    console.log('=== FILTERED INTERNS RESULT ===')
+    console.log('Filtered interns count:', filteredInterns.length)
+    if (filteredInterns.length === 0 && interns.length > 0) {
+      console.warn('⚠️ NO INTERNS AFTER FILTERING!')
+      console.log('Check filters:', { searchQuery, batchFilter, dateFilter })
+      
+      if (batchFilter) {
+        console.log('Interns batch_ids:', interns.map(i => ({ name: i.name, batch_id: i.batch_id, type: typeof i.batch_id })))
+        console.log('Filter batch_id:', batchFilter, typeof batchFilter)
+      }
+    }
+  }, [filteredInterns, interns, searchQuery, batchFilter, dateFilter])
 
-  // Already marked interns for the selected date
+  // Already marked interns for the selected date - FIXED: Proper batch comparison
   const markedInterns = useMemo(() => {
     return interns.filter(intern => {
       if (!intern) return false
@@ -320,8 +454,18 @@ export default function AttendanceAdmin() {
       // Apply search filter
       if (searchQuery && !intern.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false
       
-      // Apply batch filter
-      if (batchFilter && intern.batch_id !== parseInt(batchFilter)) return false
+      // Apply batch filter - FIXED: Handle type coercion properly
+      if (batchFilter) {
+        const internBatchId = intern.batch_id
+        const filterBatchId = batchFilter
+        
+        const matches = 
+          internBatchId === filterBatchId ||
+          String(internBatchId) === String(filterBatchId) ||
+          Number(internBatchId) === Number(filterBatchId)
+        
+        if (!matches) return false
+      }
       
       // Only show interns who have attendance marked for selected date
       const hasAttendance = attendance.some(a => {
@@ -628,6 +772,94 @@ export default function AttendanceAdmin() {
       <div className="card">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Attendance History</h2>
         
+        {/* History Filters */}
+        <div className="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-700">History Filters</h3>
+            {hasHistoryFilters && (
+              <button 
+                onClick={clearHistoryFilters}
+                className="px-2 py-1 text-xs font-medium text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded transition-all"
+              >
+                Clear History Filters
+              </button>
+            )}
+          </div>
+          
+          <div className="grid md:grid-cols-5 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Start Date</label>
+              <input
+                type="date"
+                className="input text-sm"
+                value={historyStartDate}
+                onChange={(e) => setHistoryStartDate(e.target.value)}
+                placeholder="From date..."
+              />
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">End Date</label>
+              <input
+                type="date"
+                className="input text-sm"
+                value={historyEndDate}
+                onChange={(e) => setHistoryEndDate(e.target.value)}
+                placeholder="To date..."
+              />
+            </div>
+            
+            {isAdmin && (
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Batch</label>
+                <select 
+                  className="input text-sm" 
+                  value={historyBatchFilter} 
+                  onChange={(e) => setHistoryBatchFilter(e.target.value)}
+                >
+                  <option value="">All Batches</option>
+                  {batches.map((batch) => (
+                    <option key={batch.id} value={batch.id}>{batch.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
+              <select 
+                className="input text-sm" 
+                value={historyStatusFilter} 
+                onChange={(e) => setHistoryStatusFilter(e.target.value)}
+              >
+                <option value="">All Status</option>
+                <option value="present">Present</option>
+                <option value="absent">Absent</option>
+                <option value="late">Late</option>
+                <option value="leave">Leave</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Search</label>
+              <input
+                type="text"
+                className="input text-sm"
+                placeholder="Search intern..."
+                value={historySearchQuery}
+                onChange={(e) => setHistorySearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+          
+          {hasHistoryFilters && (
+            <div className="mt-3 text-xs text-slate-600">
+              Showing <span className="font-semibold text-slate-900">{filteredHistoryRecords.length}</span> of{' '}
+              <span className="font-semibold text-slate-900">{enhancedAttendance.length}</span> records
+            </div>
+          )}
+        </div>
+        
         {loading ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600"></div>
@@ -648,7 +880,15 @@ export default function AttendanceAdmin() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {enhancedAttendance.map((record) => (
+                {filteredHistoryRecords
+                  .sort((a, b) => {
+                    // Sort by date descending (most recent first)
+                    const dateA = new Date(a.date)
+                    const dateB = new Date(b.date)
+                    return dateB - dateA
+                  })
+                  .slice(0, 100) // Limit to 100 records for performance
+                  .map((record) => (
                   <tr key={record.id}>
                     <td className="td font-medium">{record.intern_name}</td>
                     <td className="td text-sm text-slate-600">{record.intern_email}</td>
@@ -704,15 +944,32 @@ export default function AttendanceAdmin() {
                     </td>
                   </tr>
                 ))}
-                {enhancedAttendance.length === 0 && (
+                {filteredHistoryRecords.length === 0 && (
                   <tr>
                     <td className="td text-slate-500 text-center" colSpan={isAdmin ? 7 : 6}>
-                      {hasActiveFilters || dateFilter ? 'No attendance records found matching your filters.' : 'No attendance records found.'}
+                      {hasHistoryFilters ? 'No attendance records found matching your history filters.' : 'No attendance records found.'}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
+            
+            {filteredHistoryRecords.length > 100 && (
+              <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                <div className="flex items-start gap-2">
+                  <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  <div>
+                    <p className="font-semibold">Showing first 100 records</p>
+                    <p className="text-xs mt-1">
+                      You have {filteredHistoryRecords.length} total records matching your filters. 
+                      Use the date range filter above to narrow down results.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

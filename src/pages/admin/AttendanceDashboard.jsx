@@ -5,7 +5,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell
 } from 'recharts'
-import { format, subDays, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns'
+import { format, subDays } from 'date-fns'
 
 // Color palette
 const COLORS = {
@@ -15,8 +15,6 @@ const COLORS = {
   primary: '#0ea5e9',
   secondary: '#8b5cf6',
 }
-
-const CHART_COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
 
 export default function AttendanceDashboard() {
   const { user } = useAuth()
@@ -34,14 +32,13 @@ export default function AttendanceDashboard() {
     end: format(new Date(), 'yyyy-MM-dd')
   })
   const [batchFilter, setBatchFilter] = useState('')
-  const [techStackFilter, setTechStackFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [internSearch, setInternSearch] = useState('')
   const [selectedIntern, setSelectedIntern] = useState('')
   
   const isAdmin = user?.role === 'ADMIN'
 
-  // Load data
+  // Load data with proper error handling and debugging
   const loadData = useCallback(async () => {
     if (!user?.id) return
     
@@ -58,18 +55,28 @@ export default function AttendanceDashboard() {
       if (batchFilter) params.batch_id = batchFilter
       if (statusFilter) params.status = statusFilter
       
+      console.log('📊 Loading dashboard data with params:', params)
+      
       const [attendanceRes, internsRes, batchesRes] = await Promise.all([
         api.get('/attendance', { params }),
         api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
         api.get('/batches', { params: { limit: 500 } }),
       ])
       
-      setAttendanceData(attendanceRes.data || [])
-      setInterns(internsRes.data || [])
-      setBatches(batchesRes.data || [])
+      console.log('✅ Attendance Response:', attendanceRes.data)
+      console.log('✅ Interns Response:', internsRes.data)
+      console.log('✅ Batches Response:', batchesRes.data)
+      
+      // Validate and set data with fallbacks
+      setAttendanceData(Array.isArray(attendanceRes.data) ? attendanceRes.data : [])
+      setInterns(Array.isArray(internsRes.data) ? internsRes.data : [])
+      setBatches(Array.isArray(batchesRes.data) ? batchesRes.data : [])
     } catch (err) {
-      console.error('Failed to load dashboard data:', err)
+      console.error('❌ Failed to load dashboard data:', err)
       setError(err.response?.data?.detail || 'Failed to load attendance dashboard.')
+      setAttendanceData([])
+      setInterns([])
+      setBatches([])
     } finally {
       setLoading(false)
     }
@@ -79,12 +86,21 @@ export default function AttendanceDashboard() {
     loadData()
   }, [loadData])
 
+  // Create lookup maps for efficient data access
+  const internMap = useMemo(() => {
+    return Object.fromEntries((interns || []).map(intern => [intern.id, intern]))
+  }, [interns])
+
+  const batchMap = useMemo(() => {
+    return Object.fromEntries((batches || []).map(batch => [batch.id, batch]))
+  }, [batches])
+
   // Calculate summary metrics
   const summaryMetrics = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
-    const todayRecords = attendanceData.filter(r => r.date === today)
+    const todayRecords = (attendanceData || []).filter(r => r.date === today || r.day === today)
     
-    const totalInterns = interns.length
+    const totalInterns = (interns || []).length
     const presentToday = todayRecords.filter(r => r.status?.toLowerCase() === 'present').length
     const absentToday = todayRecords.filter(r => r.status?.toLowerCase() === 'absent').length
     const lateToday = todayRecords.filter(r => r.status?.toLowerCase() === 'late').length
@@ -104,10 +120,11 @@ export default function AttendanceDashboard() {
 
   // Batch-wise analytics
   const batchAnalytics = useMemo(() => {
-    const batchMap = {}
+    const batchStatsMap = {}
     
-    batches.forEach(batch => {
-      batchMap[batch.id] = {
+    // Initialize batch stats
+    (batches || []).forEach(batch => {
+      batchStatsMap[batch.id] = {
         name: batch.name,
         present: 0,
         absent: 0,
@@ -116,60 +133,91 @@ export default function AttendanceDashboard() {
       }
     })
     
-    attendanceData.forEach(record => {
-      const intern = interns.find(i => i.id === record.user_id)
-      if (intern && intern.batch_id && batchMap[intern.batch_id]) {
+    // Count attendance by batch
+    (attendanceData || []).forEach(record => {
+      const intern = internMap[record.user_id]
+      if (intern && intern.batch_id && batchStatsMap[intern.batch_id]) {
         const status = record.status?.toLowerCase()
-        if (status === 'present') batchMap[intern.batch_id].present++
-        else if (status === 'absent') batchMap[intern.batch_id].absent++
-        else if (status === 'late') batchMap[intern.batch_id].late++
-        batchMap[intern.batch_id].total++
+        if (status === 'present') batchStatsMap[intern.batch_id].present++
+        else if (status === 'absent') batchStatsMap[intern.batch_id].absent++
+        else if (status === 'late') batchStatsMap[intern.batch_id].late++
+        batchStatsMap[intern.batch_id].total++
       }
     })
     
-    return Object.values(batchMap).map(batch => ({
-      ...batch,
-      percentage: batch.total > 0 
-        ? ((batch.present + batch.late) / batch.total * 100).toFixed(1)
-        : 0
-    }))
-  }, [attendanceData, interns, batches])
+    return Object.values(batchStatsMap)
+      .filter(batch => batch.total > 0) // Only show batches with data
+      .map(batch => ({
+        ...batch,
+        percentage: ((batch.present + batch.late) / batch.total * 100).toFixed(1)
+      }))
+  }, [attendanceData, interns, batches, internMap])
 
-  // Attendance distribution (pie chart data)
+  // Attendance distribution (pie chart data) - FIX: Use Legend instead of inline labels
   const distributionData = useMemo(() => {
-    const present = attendanceData.filter(r => r.status?.toLowerCase() === 'present').length
-    const absent = attendanceData.filter(r => r.status?.toLowerCase() === 'absent').length
-    const late = attendanceData.filter(r => r.status?.toLowerCase() === 'late').length
+    const present = (attendanceData || []).filter(r => r.status?.toLowerCase() === 'present').length
+    const absent = (attendanceData || []).filter(r => r.status?.toLowerCase() === 'absent').length
+    const late = (attendanceData || []).filter(r => r.status?.toLowerCase() === 'late').length
+    
+    const total = present + absent + late
     
     return [
-      { name: 'Present', value: present, color: COLORS.present },
-      { name: 'Absent', value: absent, color: COLORS.absent },
-      { name: 'Late', value: late, color: COLORS.late },
-    ]
+      { 
+        name: 'Present', 
+        value: present, 
+        color: COLORS.present,
+        percentage: total > 0 ? ((present / total) * 100).toFixed(1) : 0
+      },
+      { 
+        name: 'Absent', 
+        value: absent, 
+        color: COLORS.absent,
+        percentage: total > 0 ? ((absent / total) * 100).toFixed(1) : 0
+      },
+      { 
+        name: 'Late', 
+        value: late, 
+        color: COLORS.late,
+        percentage: total > 0 ? ((late / total) * 100).toFixed(1) : 0
+      },
+    ].filter(item => item.value > 0) // Only show non-zero values
   }, [attendanceData])
 
-  // Attendance trends (line chart data)
+  // Attendance trends (line chart data) - FIX: Handle both 'date' and 'day' fields
   const trendData = useMemo(() => {
-    const dateMap = {}
+    const dateStatsMap = {}
     
-    attendanceData.forEach(record => {
-      if (!dateMap[record.date]) {
-        dateMap[record.date] = { date: record.date, present: 0, absent: 0, late: 0 }
+    (attendanceData || []).forEach(record => {
+      // Handle both 'date' and 'day' field names from backend
+      const recordDate = record.date || record.day
+      if (!recordDate) return
+      
+      if (!dateStatsMap[recordDate]) {
+        dateStatsMap[recordDate] = { date: recordDate, present: 0, absent: 0, late: 0 }
       }
+      
       const status = record.status?.toLowerCase()
-      if (status === 'present') dateMap[record.date].present++
-      else if (status === 'absent') dateMap[record.date].absent++
-      else if (status === 'late') dateMap[record.date].late++
+      if (status === 'present') dateStatsMap[recordDate].present++
+      else if (status === 'absent') dateStatsMap[recordDate].absent++
+      else if (status === 'late') dateStatsMap[recordDate].late++
     })
     
-    return Object.values(dateMap).sort((a, b) => new Date(a.date) - new Date(b.date))
+    return Object.values(dateStatsMap)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map(item => ({
+        ...item,
+        formattedDate: format(new Date(item.date), 'MMM dd')
+      }))
   }, [attendanceData])
 
-  // Individual intern analytics
+  // Individual intern analytics - FIX: Proper data handling
   const individualInternData = useMemo(() => {
     if (!selectedIntern) return null
     
-    const internRecords = attendanceData.filter(r => r.user_id === parseInt(selectedIntern))
+    const internRecords = (attendanceData || []).filter(r => r.user_id === parseInt(selectedIntern))
+    
+    if (internRecords.length === 0) return null
+    
     const present = internRecords.filter(r => r.status?.toLowerCase() === 'present').length
     const absent = internRecords.filter(r => r.status?.toLowerCase() === 'absent').length
     const late = internRecords.filter(r => r.status?.toLowerCase() === 'late').length
@@ -178,11 +226,12 @@ export default function AttendanceDashboard() {
     const percentage = total > 0 ? ((present + late) / total * 100).toFixed(1) : 0
     
     const trendData = internRecords
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
       .map(r => ({
-        date: r.date,
-        status: r.status?.toLowerCase() === 'present' ? 1 : 0
+        date: r.date || r.day,
+        status: r.status?.toLowerCase() === 'present' ? 1 : 0,
+        formattedDate: format(new Date(r.date || r.day), 'MMM dd')
       }))
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
     
     return {
       present,
@@ -196,22 +245,27 @@ export default function AttendanceDashboard() {
 
   // Filtered interns for search
   const filteredInterns = useMemo(() => {
-    return interns.filter(intern => 
-      intern.name?.toLowerCase().includes(internSearch.toLowerCase())
+    return (interns || []).filter(intern => 
+      intern.name?.toLowerCase().includes((internSearch || '').toLowerCase())
     )
   }, [interns, internSearch])
 
-  // Export functions
+  // Export to CSV
   const exportToCSV = () => {
+    if (!attendanceData || attendanceData.length === 0) {
+      alert('No attendance data to export')
+      return
+    }
+    
     const headers = ['Date', 'Intern Name', 'Batch', 'Status']
     const rows = attendanceData.map(record => {
-      const intern = interns.find(i => i.id === record.user_id)
-      const batch = batches.find(b => b.id === intern?.batch_id)
+      const intern = internMap[record.user_id]
+      const batch = intern ? batchMap[intern.batch_id] : null
       return [
-        record.date,
+        record.date || record.day || 'N/A',
         record.intern_name || intern?.name || 'Unknown',
         record.batch_name || batch?.name || 'Unassigned',
-        record.status
+        record.status || 'Unknown'
       ]
     })
     
@@ -225,20 +279,21 @@ export default function AttendanceDashboard() {
     window.URL.revokeObjectURL(url)
   }
 
+  // Clear all filters
   const clearFilters = () => {
     setDateRange({
       start: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
       end: format(new Date(), 'yyyy-MM-dd')
     })
     setBatchFilter('')
-    setTechStackFilter('')
     setStatusFilter('')
     setInternSearch('')
     setSelectedIntern('')
   }
 
-  const hasActiveFilters = batchFilter || techStackFilter || statusFilter || internSearch || selectedIntern
+  const hasActiveFilters = batchFilter || statusFilter || internSearch || selectedIntern
 
+  // Loading skeleton
   if (loading && attendanceData.length === 0) {
     return (
       <div className="space-y-6">
@@ -290,7 +345,8 @@ export default function AttendanceDashboard() {
             )}
             <button
               onClick={exportToCSV}
-              className="px-3 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-700 hover:to-cyan-800 rounded-md transition-all duration-200 flex items-center gap-2"
+              disabled={!attendanceData || attendanceData.length === 0}
+              className="px-3 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-700 hover:to-cyan-800 rounded-md transition-all duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -324,7 +380,7 @@ export default function AttendanceDashboard() {
               <label className="block text-sm font-medium text-slate-700 mb-1">Batch</label>
               <select className="input" value={batchFilter} onChange={(e) => setBatchFilter(e.target.value)}>
                 <option value="">All Batches</option>
-                {batches.map(batch => (
+                {(batches || []).map(batch => (
                   <option key={batch.id} value={batch.id}>{batch.name}</option>
                 ))}
               </select>
@@ -409,35 +465,42 @@ export default function AttendanceDashboard() {
           )}
         </div>
 
-        {/* Attendance Distribution */}
+        {/* Attendance Distribution - FIXED: Use Legend to avoid label overlap */}
         <div className="card">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Attendance Distribution</h2>
-          {distributionData.some(d => d.value > 0) ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={distributionData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {distributionData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+          {distributionData.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={distributionData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={false}
+                    outerRadius={90}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {distributionData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value, name, props) => [`${value} (${props.payload.percentage}%)`, name]} />
+                  <Legend 
+                    verticalAlign="bottom" 
+                    height={36}
+                    formatter={(value, entry) => `${value}: ${entry.payload.value} (${entry.payload.percentage}%)`}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </>
           ) : (
             <EmptyState message="No distribution data available" />
           )}
         </div>
 
-        {/* Attendance Trends */}
+        {/* Attendance Trends - FIXED: Use formatted dates */}
         <div className="card lg:col-span-2">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Attendance Trends Over Time</h2>
           {trendData.length > 0 ? (
@@ -458,7 +521,7 @@ export default function AttendanceDashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                <XAxis dataKey="formattedDate" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip />
                 <Legend />
@@ -473,62 +536,70 @@ export default function AttendanceDashboard() {
         </div>
       </section>
 
-      {/* Individual Intern Analytics */}
+      {/* Individual Intern Analytics - FIXED: Proper state handling */}
       <section className="card">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Individual Intern Analytics</h2>
-        <div className="grid md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Select Intern</label>
-            <select
-              className="input"
-              value={selectedIntern}
-              onChange={(e) => setSelectedIntern(e.target.value)}
-            >
-              <option value="">Choose an intern...</option>
-              {filteredInterns.map(intern => (
-                <option key={intern.id} value={intern.id}>{intern.name}</option>
-              ))}
-            </select>
+        <div className="space-y-6">
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Select Intern</label>
+              <select
+                className="input"
+                value={selectedIntern}
+                onChange={(e) => setSelectedIntern(e.target.value)}
+              >
+                <option value="">Choose an intern...</option>
+                {filteredInterns.map(intern => (
+                  <option key={intern.id} value={intern.id}>{intern.name}</option>
+                ))}
+              </select>
+            </div>
+            
+            {selectedIntern && !individualInternData && (
+              <div className="md:col-span-2">
+                <EmptyState message="No attendance data found for selected intern" />
+              </div>
+            )}
           </div>
           
           {individualInternData && (
-            <>
-              <div className="grid grid-cols-4 gap-4">
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-green-600">{individualInternData.present}</div>
-                  <div className="text-xs text-slate-600">Present</div>
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="card bg-green-50 border-green-200">
+                  <div className="text-xs uppercase tracking-wider text-green-700 font-semibold">Present</div>
+                  <div className="text-3xl font-black text-green-600 mt-2">{individualInternData.present}</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-rose-600">{individualInternData.absent}</div>
-                  <div className="text-xs text-slate-600">Absent</div>
+                <div className="card bg-rose-50 border-rose-200">
+                  <div className="text-xs uppercase tracking-wider text-rose-700 font-semibold">Absent</div>
+                  <div className="text-3xl font-black text-rose-600 mt-2">{individualInternData.absent}</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-amber-600">{individualInternData.late}</div>
-                  <div className="text-xs text-slate-600">Late</div>
+                <div className="card bg-amber-50 border-amber-200">
+                  <div className="text-xs uppercase tracking-wider text-amber-700 font-semibold">Late</div>
+                  <div className="text-3xl font-black text-amber-600 mt-2">{individualInternData.late}</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-purple-600">{individualInternData.percentage}%</div>
-                  <div className="text-xs text-slate-600">Rate</div>
+                <div className="card bg-purple-50 border-purple-200">
+                  <div className="text-xs uppercase tracking-wider text-purple-700 font-semibold">Rate</div>
+                  <div className="text-3xl font-black text-purple-600 mt-2">{individualInternData.percentage}%</div>
                 </div>
               </div>
               
-              <div className="md:col-span-2">
-                <h3 className="text-sm font-semibold text-slate-700 mb-2">Attendance Trend</h3>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Attendance Trend</h3>
                 {individualInternData.trendData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={individualInternData.trendData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} domain={[0, 1]} ticks={[0, 1]} />
-                      <Tooltip />
+                      <XAxis dataKey="formattedDate" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} domain={[0, 1]} ticks={[0, 1]} tickFormatter={(value) => value === 1 ? 'Present' : 'Absent'} />
+                      <Tooltip formatter={(value) => value === 1 ? 'Present' : 'Absent'} />
                       <Line type="monotone" dataKey="status" stroke={COLORS.primary} strokeWidth={2} dot={{ r: 4 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
-                  <EmptyState message="No trend data for selected intern" />
+                  <EmptyState message="No trend data available" />
                 )}
               </div>
-            </>
+            </div>
           )}
         </div>
       </section>

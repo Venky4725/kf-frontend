@@ -87,10 +87,11 @@ export default function AttendanceAdmin() {
     setSuccessMessage('')
     
     try {
-      // Check if attendance already exists for this intern on this date
-      const existingRecord = attendance.find(
-        a => a.user_id === internId && a.date === dateFilter
-      )
+      // Check if attendance already exists for this intern on this date - FIXED: Handle both 'date' and 'day' fields
+      const existingRecord = attendance.find(a => {
+        const recordDate = a.date || a.day
+        return a.user_id === internId && recordDate === dateFilter
+      })
       
       if (existingRecord) {
         // Update existing attendance
@@ -137,9 +138,12 @@ export default function AttendanceAdmin() {
     }
   }
 
-  // Get attendance for specific intern on selected date
+  // Get attendance for specific intern on selected date - FIXED: Handle both 'date' and 'day' fields
   const getAttendanceForIntern = (internId) => {
-    return attendance.find(a => a.user_id === internId && a.date === dateFilter)
+    return attendance.find(a => {
+      const recordDate = a.date || a.day
+      return a.user_id === internId && recordDate === dateFilter
+    })
   }
 
   // Open edit modal
@@ -259,7 +263,7 @@ export default function AttendanceAdmin() {
     return styles[status?.toLowerCase()] || 'bg-slate-100 text-slate-700 border-slate-300'
   }
 
-  // Enhanced attendance records with SAFE data mapping
+  // Enhanced attendance records with SAFE data mapping - FIXED: Normalize date field
   const enhancedAttendance = useMemo(() => {
     if (!Array.isArray(attendance)) return []
     
@@ -269,8 +273,13 @@ export default function AttendanceAdmin() {
       const intern = internMap[record.user_id]
       const batch = intern ? batchMap[intern.batch_id] : null
       
+      // Normalize date field - backend uses 'day', frontend expects 'date'
+      const normalizedDate = record.date || record.day || 'N/A'
+      
       return {
         ...record,
+        date: normalizedDate, // Ensure 'date' field exists
+        day: normalizedDate,  // Keep 'day' for compatibility
         intern_name: intern?.name || record.intern_name || 'Unknown',
         intern_email: intern?.email || 'N/A',
         batch_name: batch?.name || record.batch_name || 'Unassigned',
@@ -279,15 +288,50 @@ export default function AttendanceAdmin() {
     }).filter(Boolean) // Remove null entries
   }, [attendance, internMap, batchMap])
 
-  // Filtered interns for marking attendance
+  // Filtered interns for marking attendance - FIXED: Hide already-marked interns
   const filteredInterns = useMemo(() => {
     return interns.filter(intern => {
       if (!intern) return false
+      
+      // Apply search filter
       if (searchQuery && !intern.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false
+      
+      // Apply batch filter
       if (batchFilter && intern.batch_id !== parseInt(batchFilter)) return false
+      
+      // Hide interns who already have attendance marked for selected date
+      const hasAttendance = attendance.some(a => {
+        const recordDate = a.date || a.day
+        return a.user_id === intern.id && recordDate === dateFilter
+      })
+      
+      // Only show interns without attendance for the selected date
+      if (hasAttendance) return false
+      
       return true
     })
-  }, [interns, searchQuery, batchFilter])
+  }, [interns, searchQuery, batchFilter, attendance, dateFilter])
+
+  // Already marked interns for the selected date
+  const markedInterns = useMemo(() => {
+    return interns.filter(intern => {
+      if (!intern) return false
+      
+      // Apply search filter
+      if (searchQuery && !intern.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false
+      
+      // Apply batch filter
+      if (batchFilter && intern.batch_id !== parseInt(batchFilter)) return false
+      
+      // Only show interns who have attendance marked for selected date
+      const hasAttendance = attendance.some(a => {
+        const recordDate = a.date || a.day
+        return a.user_id === intern.id && recordDate === dateFilter
+      })
+      
+      return hasAttendance
+    })
+  }, [interns, searchQuery, batchFilter, attendance, dateFilter])
 
   return (
     <div className="space-y-6">
@@ -482,7 +526,10 @@ export default function AttendanceAdmin() {
                 {filteredInterns.length === 0 && (
                   <tr>
                     <td className="td text-slate-500 text-center" colSpan="5">
-                      {searchQuery || batchFilter ? 'No interns found matching your filters.' : 'No interns found.'}
+                      {markedInterns.length > 0 
+                        ? `All ${markedInterns.length} intern(s) have attendance marked for this date. See "Already Marked" section below.`
+                        : (searchQuery || batchFilter ? 'No interns found matching your filters.' : 'No interns found.')
+                      }
                     </td>
                   </tr>
                 )}
@@ -491,6 +538,91 @@ export default function AttendanceAdmin() {
           </div>
         )}
       </div>
+
+      {/* Already Marked Interns Section */}
+      {markedInterns.length > 0 && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">
+            Already Marked for {new Date(dateFilter).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          </h2>
+          <p className="text-sm text-slate-500 mb-4">
+            These interns already have attendance marked for the selected date. You can update their status by clicking the buttons.
+          </p>
+          
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="th">Intern Name</th>
+                  <th className="th">Email</th>
+                  <th className="th">Batch</th>
+                  <th className="th">Current Status</th>
+                  <th className="th">Update Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {markedInterns.map((intern) => {
+                  const attendanceRecord = getAttendanceForIntern(intern.id)
+                  const currentStatus = attendanceRecord?.status?.toLowerCase()
+                  const key = `${intern.id}-${dateFilter}`
+                  const isMarking = markingAttendance[key]
+                  const batch = batchMap[intern.batch_id]
+                  
+                  return (
+                    <tr key={intern.id} className="bg-green-50/30">
+                      <td className="td font-medium">{intern.name}</td>
+                      <td className="td text-sm text-slate-600">{intern.email}</td>
+                      <td className="td">{batch?.name || 'Unassigned'}</td>
+                      <td className="td">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full border ${getStatusBadge(currentStatus)}`}>
+                          {currentStatus?.toUpperCase() || 'UNKNOWN'}
+                        </span>
+                      </td>
+                      <td className="td">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => markAttendance(intern.id, 'present')}
+                            disabled={isMarking}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                              currentStatus === 'present'
+                                ? 'bg-green-100 text-green-700 border border-green-300'
+                                : 'bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed'
+                            }`}
+                          >
+                            {isMarking ? '...' : 'Present'}
+                          </button>
+                          <button
+                            onClick={() => markAttendance(intern.id, 'absent')}
+                            disabled={isMarking}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                              currentStatus === 'absent'
+                                ? 'bg-rose-100 text-rose-700 border border-rose-300'
+                                : 'bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed'
+                            }`}
+                          >
+                            {isMarking ? '...' : 'Absent'}
+                          </button>
+                          <button
+                            onClick={() => markAttendance(intern.id, 'late')}
+                            disabled={isMarking}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                              currentStatus === 'late'
+                                ? 'bg-amber-100 text-amber-700 border border-amber-300'
+                                : 'bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed'
+                            }`}
+                          >
+                            {isMarking ? '...' : 'Late'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Attendance History with Edit/Delete */}
       <div className="card">
@@ -521,7 +653,19 @@ export default function AttendanceAdmin() {
                     <td className="td font-medium">{record.intern_name}</td>
                     <td className="td text-sm text-slate-600">{record.intern_email}</td>
                     <td className="td">{record.batch_name}</td>
-                    <td className="td">{record.date}</td>
+                    <td className="td">
+                      {record.date && record.date !== 'N/A' ? (
+                        <span className="text-slate-900">
+                          {new Date(record.date).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'short', 
+                            day: 'numeric' 
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">No date</span>
+                      )}
+                    </td>
                     <td className="td">
                       <span className={`px-2 py-1 text-xs font-semibold rounded-full border ${getStatusBadge(record.status)}`}>
                         {record.status?.toUpperCase() || 'UNKNOWN'}
@@ -541,7 +685,16 @@ export default function AttendanceAdmin() {
                           Edit
                         </button>
                         <button
-                          onClick={() => deleteAttendance(record.id, record.intern_name, record.date)}
+                          onClick={() => {
+                            const formattedDate = record.date && record.date !== 'N/A' 
+                              ? new Date(record.date).toLocaleDateString('en-US', { 
+                                  year: 'numeric', 
+                                  month: 'short', 
+                                  day: 'numeric' 
+                                })
+                              : record.date
+                            deleteAttendance(record.id, record.intern_name, formattedDate)
+                          }}
                           disabled={deletingRecord === record.id}
                           className="px-3 py-1.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -570,7 +723,18 @@ export default function AttendanceAdmin() {
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
             <h2 className="text-xl font-bold text-slate-900 mb-4">Edit Attendance</h2>
             <p className="text-sm text-slate-500 mb-4">
-              Editing attendance for <span className="font-semibold">{editingRecord.intern_name}</span> on {editingRecord.date}
+              Editing attendance for <span className="font-semibold">{editingRecord.intern_name}</span> on{' '}
+              {editingRecord.date && editingRecord.date !== 'N/A' ? (
+                <span className="font-semibold">
+                  {new Date(editingRecord.date).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </span>
+              ) : (
+                <span className="font-semibold">Unknown date</span>
+              )}
             </p>
             
             {error && (

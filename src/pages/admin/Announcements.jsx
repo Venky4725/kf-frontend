@@ -15,6 +15,11 @@ export default function Announcements() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   
+  // Edit modal state
+  const [editingNotification, setEditingNotification] = useState(null)
+  const [editForm, setEditForm] = useState({ title: '', message: '', user_id: '' })
+  const [editLoading, setEditLoading] = useState(false)
+  
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
@@ -98,16 +103,162 @@ export default function Announcements() {
   }
 
   async function deleteNotification(id) {
-    if (!canManage || !window.confirm('Delete this notification?')) return
+    if (!window.confirm('Delete this notification? This action cannot be undone.')) return
+    
     try {
       await api.delete(`/notifications/${id}`)
+      setSuccess('Notification deleted successfully!')
+      setTimeout(() => setSuccess(''), 3000)
       load()
+      // Trigger unread count refresh
+      window.dispatchEvent(new Event('notificationUpdate'))
     } catch (err) {
-      if (err.response?.status === 403) {
-        setError('You can only manage resources in your assigned batches.')
-      } else {
-        setError(err.response?.data?.detail || 'Failed to delete notification.')
+      console.error('Failed to delete notification:', err)
+      // Show the actual backend error message
+      const errorMsg = err.response?.data?.detail || 'Failed to delete notification.'
+      setError(errorMsg)
+    }
+  }
+
+  // Open edit modal
+  function openEditModal(notification) {
+    console.log('=== OPENING EDIT MODAL ===')
+    console.log('Notification:', notification)
+    console.log('User ID:', notification.user_id, 'Type:', typeof notification.user_id)
+    console.log('Is Broadcast:', notification.is_broadcast)
+    console.log('Current User:', user?.id, user?.role)
+    
+    setEditingNotification(notification)
+    setEditForm({
+      title: notification.title || '',
+      message: notification.message || '',
+      user_id: String(notification.user_id || '') // Convert to string for form
+    })
+    setError('')
+    setSuccess('')
+  }
+
+  // Close edit modal
+  function closeEditModal() {
+    setEditingNotification(null)
+    setEditForm({ title: '', message: '', user_id: '' })
+    setError('')
+  }
+
+  // Update notification
+  async function updateNotification(event) {
+    event.preventDefault()
+    if (!editingNotification) return
+    
+    // Permission check: Only ADMIN/TECH_LEAD can edit
+    if (user?.role !== 'ADMIN' && user?.role !== 'TECHNICAL_LEAD') {
+      setError('Only administrators and technical leads can edit notifications.')
+      return
+    }
+    
+    setEditLoading(true)
+    setError('')
+    
+    try {
+      // Build update payload - match backend schema
+      const updateData = {
+        title: editForm.title.trim(),
+        message: editForm.message.trim(),
       }
+      
+      // For non-broadcast notifications, include user_id if changed
+      if (!editingNotification.is_broadcast) {
+        const targetUserId = editForm.user_id || editingNotification.user_id
+        if (!targetUserId) {
+          setError('Receiver is required for non-broadcast notifications.')
+          setEditLoading(false)
+          return
+        }
+        // Ensure it's a number
+        updateData.user_id = parseInt(targetUserId, 10)
+        
+        if (isNaN(updateData.user_id)) {
+          setError('Invalid receiver ID.')
+          setEditLoading(false)
+          return
+        }
+      }
+      
+      // DO NOT send is_read when editing - that's only for mark as read functionality
+      
+      console.log('=== NOTIFICATION UPDATE DEBUG ===')
+      console.log('Notification ID:', editingNotification.id)
+      console.log('User Role:', user?.role)
+      console.log('Is Broadcast:', editingNotification.is_broadcast)
+      console.log('Original user_id:', editingNotification.user_id)
+      console.log('Edit form user_id:', editForm.user_id)
+      console.log('Final payload:', updateData)
+      console.log('Current user:', { id: user?.id, role: user?.role })
+      console.log('API endpoint:', `/notifications/${editingNotification.id}`)
+      
+      const response = await api.put(`/notifications/${editingNotification.id}`, updateData)
+      
+      console.log('✅ Update successful:', response.data)
+      
+      setSuccess('Notification updated successfully!')
+      setTimeout(() => setSuccess(''), 3000)
+      closeEditModal()
+      load()
+      // Trigger unread count refresh
+      window.dispatchEvent(new Event('notificationUpdate'))
+    } catch (err) {
+      console.error('Failed to update notification:', err)
+      console.error('Error response:', err.response?.data)
+      console.error('Request data sent:', {
+        title: editForm.title,
+        message: editForm.message,
+        user_id: editForm.user_id,
+        notification_id: editingNotification.id
+      })
+      
+      // Handle validation errors (422)
+      if (err.response?.status === 422) {
+        const detail = err.response?.data?.detail
+        console.error('422 Validation detail:', detail)
+        
+        if (Array.isArray(detail)) {
+          // FastAPI validation errors are arrays of objects
+          // Each object has: type, loc (array), msg, input
+          const errorMessages = detail.map(e => {
+            // Safely extract location path
+            const location = Array.isArray(e.loc) ? e.loc.join('.') : 'unknown'
+            // Safely extract message
+            const message = e.msg || e.message || 'validation error'
+            return `${location}: ${message}`
+          }).join('; ')
+          setError(`Validation error: ${errorMessages}`)
+        } else if (typeof detail === 'string') {
+          setError(detail)
+        } else if (detail && typeof detail === 'object') {
+          // Convert object to readable string
+          setError(`Validation error: ${JSON.stringify(detail)}`)
+        } else {
+          setError('Validation error: The backend rejected this update. Please check the console for details.')
+        }
+      } else if (err.response?.status === 403) {
+        setError('You can only edit notifications you created.')
+        console.error('403 Forbidden - Permission denied')
+        console.error('User role:', user?.role)
+        console.error('User ID:', user?.id)
+        console.error('Notification sender_id:', editingNotification.sender_id)
+        console.error('Notification is_sender:', editingNotification.is_sender)
+      } else if (err.response?.status === 404) {
+        setError('Notification not found.')
+      } else {
+        const errorMsg = err.response?.data?.detail
+        if (typeof errorMsg === 'string') {
+          setError(errorMsg)
+        } else {
+          setError('Failed to update notification. Please try again.')
+        }
+      }
+    } finally {
+      setEditLoading(false)
     }
   }
 
@@ -212,9 +363,13 @@ export default function Announcements() {
         <h2 className="text-lg font-semibold text-slate-900">All Notifications</h2>
         {notifications.length === 0 && <div className="card text-slate-500">No notifications found.</div>}
         {notifications.map((item) => {
-          // Use is_sender from backend to determine perspective
+          // Determine user's relationship to this notification
           const isSender = item.is_sender === true
           const isReceiver = !isSender
+          
+          // Permission logic based on role
+          const canEdit = user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD' // ADMIN/TL can edit any notification
+          const canMarkRead = isReceiver // Only receiver can mark as read
           
           return (
             <div key={item.id} className={`card ${item.is_read ? 'bg-white' : 'bg-blue-50 border-l-4 border-blue-500'}`}>
@@ -222,6 +377,13 @@ export default function Announcements() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <div className="font-semibold text-slate-900">{item.title}</div>
+                    
+                    {/* Edited badge - show if notification was edited */}
+                    {item.edited_at && (
+                      <span className="px-2 py-0.5 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300 rounded-full">
+                        Edited
+                      </span>
+                    )}
                     
                     {/* New badge - only for receiver if unread */}
                     {isReceiver && !item.is_read && (
@@ -280,8 +442,8 @@ export default function Announcements() {
                 
                 {/* Action buttons */}
                 <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-                  {/* Mark as read - only for receiver */}
-                  {isReceiver && (
+                  {/* Mark as read/unread - only for receiver */}
+                  {canMarkRead && (
                     <button 
                       className="px-4 py-2 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors flex items-center gap-2 justify-center min-w-[140px]"
                       onClick={() => markRead(item.id, !item.is_read)}
@@ -304,24 +466,181 @@ export default function Announcements() {
                     </button>
                   )}
                   
-                  {/* Delete - only for managers */}
-                  {canManage && (
+                  {/* Edit - ADMIN/TECH_LEAD can edit any notification */}
+                  {canEdit && (
                     <button 
-                      className="px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors flex items-center gap-2 justify-center min-w-[120px]"
-                      onClick={() => deleteNotification(item.id)}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2 justify-center min-w-[120px]"
+                      onClick={() => openEditModal(item)}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                       </svg>
-                      Delete
+                      Edit
                     </button>
                   )}
+                  
+                  {/* Delete button removed - notifications cannot be deleted */}
                 </div>
               </div>
             </div>
           )
         })}
       </div>
+
+      {/* Edit Notification Modal */}
+      {editingNotification && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-slate-900">Edit Notification</h2>
+              <button
+                onClick={closeEditModal}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+                disabled={editLoading}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {error && (
+              <div className="mb-4 p-3 rounded bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={updateNotification} className="space-y-4">
+              {/* Receiver (if not broadcast) */}
+              {!editingNotification.is_broadcast && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Receiver *
+                  </label>
+                  <select
+                    className="input"
+                    value={editForm.user_id}
+                    onChange={(e) => setEditForm({ ...editForm, user_id: e.target.value })}
+                    required
+                    disabled={editLoading}
+                  >
+                    <option value="">Select recipient</option>
+                    {profiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.name} ({profile.role})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Current: {profileMap[editingNotification.user_id]?.name || 'Unknown'}
+                  </p>
+                </div>
+              )}
+
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Title *
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  value={editForm.title}
+                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                  placeholder="Notification title"
+                  required
+                  disabled={editLoading}
+                />
+              </div>
+
+              {/* Message */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Message *
+                </label>
+                <textarea
+                  className="input min-h-[120px] resize-y"
+                  value={editForm.message}
+                  onChange={(e) => setEditForm({ ...editForm, message: e.target.value })}
+                  placeholder="Notification message"
+                  required
+                  disabled={editLoading}
+                  rows={5}
+                />
+              </div>
+
+              {/* Notification Info */}
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-slate-600">Type:</span>{' '}
+                    <span className="font-medium text-slate-900">{editingNotification.type || 'SYSTEM'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-600">Status:</span>{' '}
+                    <span className="font-medium text-slate-900">
+                      {editingNotification.is_read ? 'Read' : 'Unread'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-600">Created:</span>{' '}
+                    <span className="font-medium text-slate-900">
+                      {new Date(editingNotification.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  {editingNotification.edited_at && (
+                    <div>
+                      <span className="text-slate-600">Last Edited:</span>{' '}
+                      <span className="font-medium text-slate-900">
+                        {new Date(editingNotification.edited_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
+                  {editingNotification.is_broadcast && (
+                    <div className="col-span-2">
+                      <span className="font-medium text-purple-700">Broadcast to all users</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors"
+                  disabled={editLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  disabled={editLoading}
+                >
+                  {editLoading ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Save Changes
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

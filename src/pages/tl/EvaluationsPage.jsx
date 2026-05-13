@@ -92,8 +92,6 @@ export default function EvaluationsPage() {
 
   async function load() {
     if (!user?.id) return
-    
-    let isMounted = true; // Flag for cleanup
 
     try {
       const [profiles, batches, evaluationList] = await Promise.all([
@@ -107,35 +105,25 @@ export default function EvaluationsPage() {
         }),
       ])
 
-      if (isMounted) {
-        if (user?.role === 'TECHNICAL_LEAD') {
-          const allowedBatchIds = new Set((batches.data || []).map((batch) => batch.id))
-          setInterns((profiles.data || []).filter((intern) => allowedBatchIds.has(intern.batch_id)))
-        } else {
-          setInterns(profiles.data || [])
-        }
-        setEvaluations(evaluationList.data || [])
-        setError('')
+      if (user?.role === 'TECHNICAL_LEAD') {
+        const allowedBatchIds = new Set((batches.data || []).map((batch) => batch.id))
+        setInterns((profiles.data || []).filter((intern) => allowedBatchIds.has(intern.batch_id)))
+      } else {
+        setInterns(profiles.data || [])
       }
+      setEvaluations(evaluationList.data || [])
+      setError('')
     } catch (err) {
-      if (isMounted) {
-        console.error('Failed to load evaluations:', err)
-        setError(err.response?.data?.detail || 'Failed to load evaluations.')
-        setInterns([])
-        setEvaluations([])
-      }
+      console.error('Failed to load evaluations:', err)
+      setError(err.response?.data?.detail || 'Failed to load evaluations.')
+      setInterns([])
+      setEvaluations([])
     }
-    
-    return () => {
-      isMounted = false; // Cleanup function
-    };
   }
 
   useEffect(() => {
-    const cleanup = load();
-    // Ensure cleanup function is called on component unmount
-    return () => cleanup(); 
-  }, [user]);
+    load()
+  }, [user])
 
   async function createEvaluation(event) {
     event.preventDefault()
@@ -224,14 +212,6 @@ This action cannot be undone.`)) {
       }
     }
   }
-
-  // Effect to close modal if the edited evaluation is no longer in the list after a refresh
-  useEffect(() => {
-    if (editingEvaluation && !evaluations.some(e => e.id === editingEvaluation.id)) {
-      console.warn("Editing evaluation no longer found, closing modal.");
-      closeEditModal();
-    }
-  }, [evaluations, editingEvaluation]);
 
   // Clear all filters and reset to default view
   function clearFilters() {

@@ -13,6 +13,7 @@ import ProfileSettings from './pages/ProfileSettings'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import Announcements from './pages/admin/Announcements'
 import AttendanceAdmin from './pages/admin/AttendanceAdmin'
+import AttendanceDashboard from './pages/admin/AttendanceDashboard'
 import BatchManagement from './pages/admin/BatchManagement'
 import AdminInternManagement from './pages/admin/InternManagement'
 import TLManagement from './pages/admin/TLManagement'
@@ -67,6 +68,7 @@ export default function App() {
             <Route path="/batches" element={<AR roles={['ADMIN']}><BatchManagement /></AR>} />
             <Route path="/tasks" element={<AR roles={['ADMIN', 'TECHNICAL_LEAD']}><WeeklyPlans /></AR>} />
             <Route path="/attendance" element={<AR roles={['ADMIN', 'TECHNICAL_LEAD']}><AttendanceAdmin /></AR>} />
+            <Route path="/attendance/dashboard" element={<AR roles={['ADMIN', 'TECHNICAL_LEAD']}><AttendanceDashboard /></AR>} />
             <Route path="/submissions" element={<AR roles={['ADMIN', 'TECHNICAL_LEAD']}><SubmissionsView /></AR>} />
             <Route path="/evaluations" element={<AR roles={['ADMIN', 'TECHNICAL_LEAD']}><EvaluationsPage /></AR>} />
             <Route path="/notifications" element={<ProtectedRoute><Announcements /></ProtectedRoute>} />

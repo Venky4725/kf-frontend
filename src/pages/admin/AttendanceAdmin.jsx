@@ -79,7 +79,7 @@ export default function AttendanceAdmin() {
     loadData()
   }, [loadData])
 
-  // Mark attendance (create or update)
+  // Mark attendance (create or update) - ENHANCED ERROR HANDLING
   const markAttendance = async (internId, status) => {
     const key = `${internId}-${dateFilter}`
     setMarkingAttendance(prev => ({ ...prev, [key]: true }))
@@ -97,7 +97,7 @@ export default function AttendanceAdmin() {
         await api.put(`/attendance/${existingRecord.id}`, {
           status: status.toUpperCase(),
         })
-        setSuccessMessage(`Attendance updated to ${status}`)
+        setSuccessMessage(`✅ Attendance updated to ${status.toUpperCase()}`)
       } else {
         // Create new attendance
         await api.post('/attendance', {
@@ -105,14 +105,33 @@ export default function AttendanceAdmin() {
           day: dateFilter,
           status: status.toUpperCase(),
         })
-        setSuccessMessage(`Attendance marked as ${status}`)
+        setSuccessMessage(`✅ Attendance marked as ${status.toUpperCase()}`)
       }
       
       setTimeout(() => setSuccessMessage(''), 3000)
+      
+      // Refresh data to update UI
       await loadData()
     } catch (err) {
-      console.error('Failed to mark attendance:', err)
-      setError(err.response?.data?.detail || 'Failed to mark attendance.')
+      console.error('❌ Failed to mark attendance:', err)
+      
+      // Differentiate error types
+      if (err.code === 'ERR_NETWORK' || !err.response) {
+        setError('❌ Network error: Unable to connect to server. Please check your connection.')
+      } else if (err.response?.status === 400) {
+        const detail = err.response?.data?.detail || 'Invalid request'
+        setError(`❌ Validation error: ${detail}`)
+      } else if (err.response?.status === 422) {
+        const detail = err.response?.data?.detail || 'Invalid data format'
+        setError(`❌ Data error: ${detail}`)
+      } else if (err.response?.status === 500) {
+        const detail = err.response?.data?.detail || 'Server error'
+        setError(`❌ Server error: ${detail}. Please try again or contact support.`)
+      } else if (err.response?.status === 403) {
+        setError('❌ Access denied: You do not have permission to mark attendance for this intern.')
+      } else {
+        setError(err.response?.data?.detail || '❌ Failed to mark attendance. Please try again.')
+      }
     } finally {
       setMarkingAttendance(prev => ({ ...prev, [key]: false }))
     }
@@ -140,7 +159,7 @@ export default function AttendanceAdmin() {
     setError('')
   }
 
-  // Update attendance
+  // Update attendance - ENHANCED ERROR HANDLING
   const updateAttendance = async (e) => {
     e.preventDefault()
     if (!editingRecord) return
@@ -154,19 +173,36 @@ export default function AttendanceAdmin() {
         notes: editForm.notes || null,
       })
       
-      setSuccessMessage('Attendance updated successfully')
+      setSuccessMessage('✅ Attendance updated successfully')
       setTimeout(() => setSuccessMessage(''), 3000)
       closeEditModal()
+      
+      // Refresh data to update UI
       await loadData()
     } catch (err) {
-      console.error('Failed to update attendance:', err)
-      setError(err.response?.data?.detail || 'Failed to update attendance.')
+      console.error('❌ Failed to update attendance:', err)
+      
+      // Differentiate error types
+      if (err.code === 'ERR_NETWORK' || !err.response) {
+        setError('❌ Network error: Unable to connect to server.')
+      } else if (err.response?.status === 400 || err.response?.status === 422) {
+        const detail = err.response?.data?.detail || 'Invalid data'
+        setError(`❌ Validation error: ${detail}`)
+      } else if (err.response?.status === 500) {
+        setError('❌ Server error: Please try again or contact support.')
+      } else if (err.response?.status === 403) {
+        setError('❌ Access denied: You cannot edit this attendance record.')
+      } else if (err.response?.status === 404) {
+        setError('❌ Attendance record not found.')
+      } else {
+        setError(err.response?.data?.detail || '❌ Failed to update attendance.')
+      }
     } finally {
       setEditLoading(false)
     }
   }
 
-  // Delete attendance
+  // Delete attendance - ENHANCED ERROR HANDLING
   const deleteAttendance = async (recordId, internName, date) => {
     if (!window.confirm(`Delete attendance record for ${internName} on ${date}?\n\nThis action cannot be undone.`)) {
       return
@@ -177,15 +213,25 @@ export default function AttendanceAdmin() {
     
     try {
       await api.delete(`/attendance/${recordId}`)
-      setSuccessMessage('Attendance record deleted successfully')
+      setSuccessMessage('✅ Attendance record deleted successfully')
       setTimeout(() => setSuccessMessage(''), 3000)
+      
+      // Refresh data to update UI
       await loadData()
     } catch (err) {
-      console.error('Failed to delete attendance:', err)
-      if (err.response?.status === 403) {
-        setError('Access denied: You can only delete attendance records for interns in your assigned batches.')
+      console.error('❌ Failed to delete attendance:', err)
+      
+      // Differentiate error types
+      if (err.code === 'ERR_NETWORK' || !err.response) {
+        setError('❌ Network error: Unable to connect to server.')
+      } else if (err.response?.status === 403) {
+        setError('❌ Access denied: You can only delete attendance records for interns in your assigned batches.')
+      } else if (err.response?.status === 404) {
+        setError('❌ Attendance record not found.')
+      } else if (err.response?.status === 500) {
+        setError('❌ Server error: Please try again or contact support.')
       } else {
-        setError(err.response?.data?.detail || 'Failed to delete attendance record.')
+        setError(err.response?.data?.detail || '❌ Failed to delete attendance record.')
       }
     } finally {
       setDeletingRecord(null)
@@ -202,19 +248,24 @@ export default function AttendanceAdmin() {
 
   const hasActiveFilters = searchQuery || batchFilter || statusFilter
 
-  // Get status badge styling
+  // Get status badge styling - UPDATED WITH ALL STATUSES
   const getStatusBadge = (status) => {
     const styles = {
       present: 'bg-green-100 text-green-700 border-green-300',
       absent: 'bg-rose-100 text-rose-700 border-rose-300',
       late: 'bg-amber-100 text-amber-700 border-amber-300',
+      leave: 'bg-blue-100 text-blue-700 border-blue-300',
     }
     return styles[status?.toLowerCase()] || 'bg-slate-100 text-slate-700 border-slate-300'
   }
 
-  // Enhanced attendance records with proper data mapping
+  // Enhanced attendance records with SAFE data mapping
   const enhancedAttendance = useMemo(() => {
+    if (!Array.isArray(attendance)) return []
+    
     return attendance.map(record => {
+      if (!record) return null
+      
       const intern = internMap[record.user_id]
       const batch = intern ? batchMap[intern.batch_id] : null
       
@@ -225,7 +276,7 @@ export default function AttendanceAdmin() {
         batch_name: batch?.name || record.batch_name || 'Unassigned',
         batch_id: intern?.batch_id || null,
       }
-    })
+    }).filter(Boolean) // Remove null entries
   }, [attendance, internMap, batchMap])
 
   // Filtered interns for marking attendance
@@ -334,6 +385,7 @@ export default function AttendanceAdmin() {
               <option value="present">Present</option>
               <option value="absent">Absent</option>
               <option value="late">Late</option>
+              <option value="leave">Leave</option>
             </select>
           </div>
         </div>
@@ -542,6 +594,7 @@ export default function AttendanceAdmin() {
                   <option value="present">Present</option>
                   <option value="absent">Absent</option>
                   <option value="late">Late</option>
+                  <option value="leave">Leave</option>
                 </select>
               </div>
               

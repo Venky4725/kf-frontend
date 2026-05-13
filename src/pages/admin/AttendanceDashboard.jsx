@@ -95,15 +95,19 @@ export default function AttendanceDashboard() {
     return Object.fromEntries((batches || []).map(batch => [batch.id, batch]))
   }, [batches])
 
-  // Calculate summary metrics
+  // Calculate summary metrics - SAFE HANDLING
   const summaryMetrics = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
-    const todayRecords = (attendanceData || []).filter(r => r.date === today || r.day === today)
+    const todayRecords = (attendanceData || []).filter(r => {
+      const recordDate = r?.date || r?.day
+      return recordDate === today
+    })
     
     const totalInterns = (interns || []).length
-    const presentToday = todayRecords.filter(r => r.status?.toLowerCase() === 'present').length
-    const absentToday = todayRecords.filter(r => r.status?.toLowerCase() === 'absent').length
-    const lateToday = todayRecords.filter(r => r.status?.toLowerCase() === 'late').length
+    const presentToday = todayRecords.filter(r => r?.status?.toLowerCase() === 'present').length
+    const absentToday = todayRecords.filter(r => r?.status?.toLowerCase() === 'absent').length
+    const lateToday = todayRecords.filter(r => r?.status?.toLowerCase() === 'late').length
+    const leaveToday = todayRecords.filter(r => r?.status?.toLowerCase() === 'leave').length
     
     const attendancePercentage = totalInterns > 0 
       ? ((presentToday + lateToday) / totalInterns * 100).toFixed(1)
@@ -114,33 +118,39 @@ export default function AttendanceDashboard() {
       presentToday,
       absentToday,
       lateToday,
+      leaveToday,
       attendancePercentage
     }
   }, [attendanceData, interns])
 
-  // Batch-wise analytics
+  // Batch-wise analytics - SAFE HANDLING
   const batchAnalytics = useMemo(() => {
     const batchStatsMap = {}
     
     // Initialize batch stats
     (batches || []).forEach(batch => {
+      if (!batch?.id || !batch?.name) return
       batchStatsMap[batch.id] = {
         name: batch.name,
         present: 0,
         absent: 0,
         late: 0,
+        leave: 0,
         total: 0
       }
     })
     
     // Count attendance by batch
     (attendanceData || []).forEach(record => {
+      if (!record?.user_id || !record?.status) return
+      
       const intern = internMap[record.user_id]
-      if (intern && intern.batch_id && batchStatsMap[intern.batch_id]) {
-        const status = record.status?.toLowerCase()
+      if (intern?.batch_id && batchStatsMap[intern.batch_id]) {
+        const status = record.status.toLowerCase()
         if (status === 'present') batchStatsMap[intern.batch_id].present++
         else if (status === 'absent') batchStatsMap[intern.batch_id].absent++
         else if (status === 'late') batchStatsMap[intern.batch_id].late++
+        else if (status === 'leave') batchStatsMap[intern.batch_id].leave++
         batchStatsMap[intern.batch_id].total++
       }
     })
@@ -153,13 +163,14 @@ export default function AttendanceDashboard() {
       }))
   }, [attendanceData, interns, batches, internMap])
 
-  // Attendance distribution (pie chart data) - FIX: Use Legend instead of inline labels
+  // Attendance distribution (pie chart data) - FIXED: Use Legend, support all statuses
   const distributionData = useMemo(() => {
-    const present = (attendanceData || []).filter(r => r.status?.toLowerCase() === 'present').length
-    const absent = (attendanceData || []).filter(r => r.status?.toLowerCase() === 'absent').length
-    const late = (attendanceData || []).filter(r => r.status?.toLowerCase() === 'late').length
+    const present = (attendanceData || []).filter(r => r?.status?.toLowerCase() === 'present').length
+    const absent = (attendanceData || []).filter(r => r?.status?.toLowerCase() === 'absent').length
+    const late = (attendanceData || []).filter(r => r?.status?.toLowerCase() === 'late').length
+    const leave = (attendanceData || []).filter(r => r?.status?.toLowerCase() === 'leave').length
     
-    const total = present + absent + late
+    const total = present + absent + late + leave
     
     return [
       { 
@@ -180,26 +191,35 @@ export default function AttendanceDashboard() {
         color: COLORS.late,
         percentage: total > 0 ? ((late / total) * 100).toFixed(1) : 0
       },
+      { 
+        name: 'Leave', 
+        value: leave, 
+        color: '#3b82f6',
+        percentage: total > 0 ? ((leave / total) * 100).toFixed(1) : 0
+      },
     ].filter(item => item.value > 0) // Only show non-zero values
   }, [attendanceData])
 
-  // Attendance trends (line chart data) - FIX: Handle both 'date' and 'day' fields
+  // Attendance trends (line chart data) - FIXED: Safe handling of date/day fields
   const trendData = useMemo(() => {
     const dateStatsMap = {}
     
     (attendanceData || []).forEach(record => {
+      if (!record) return
+      
       // Handle both 'date' and 'day' field names from backend
       const recordDate = record.date || record.day
       if (!recordDate) return
       
       if (!dateStatsMap[recordDate]) {
-        dateStatsMap[recordDate] = { date: recordDate, present: 0, absent: 0, late: 0 }
+        dateStatsMap[recordDate] = { date: recordDate, present: 0, absent: 0, late: 0, leave: 0 }
       }
       
       const status = record.status?.toLowerCase()
       if (status === 'present') dateStatsMap[recordDate].present++
       else if (status === 'absent') dateStatsMap[recordDate].absent++
       else if (status === 'late') dateStatsMap[recordDate].late++
+      else if (status === 'leave') dateStatsMap[recordDate].leave++
     })
     
     return Object.values(dateStatsMap)
@@ -210,36 +230,44 @@ export default function AttendanceDashboard() {
       }))
   }, [attendanceData])
 
-  // Individual intern analytics - FIX: Proper data handling
+  // Individual intern analytics - FIXED: Comprehensive safe handling
   const individualInternData = useMemo(() => {
     if (!selectedIntern) return null
     
-    const internRecords = (attendanceData || []).filter(r => r.user_id === parseInt(selectedIntern))
+    const internRecords = (attendanceData || []).filter(r => 
+      r?.user_id === parseInt(selectedIntern)
+    )
     
-    if (internRecords.length === 0) return null
+    if (!internRecords || internRecords.length === 0) return null
     
-    const present = internRecords.filter(r => r.status?.toLowerCase() === 'present').length
-    const absent = internRecords.filter(r => r.status?.toLowerCase() === 'absent').length
-    const late = internRecords.filter(r => r.status?.toLowerCase() === 'late').length
+    const present = internRecords.filter(r => r?.status?.toLowerCase() === 'present').length
+    const absent = internRecords.filter(r => r?.status?.toLowerCase() === 'absent').length
+    const late = internRecords.filter(r => r?.status?.toLowerCase() === 'late').length
+    const leave = internRecords.filter(r => r?.status?.toLowerCase() === 'leave').length
     const total = internRecords.length
     
     const percentage = total > 0 ? ((present + late) / total * 100).toFixed(1) : 0
     
     const trendData = internRecords
-      .map(r => ({
-        date: r.date || r.day,
-        status: r.status?.toLowerCase() === 'present' ? 1 : 0,
-        formattedDate: format(new Date(r.date || r.day), 'MMM dd')
-      }))
+      .filter(r => r?.date || r?.day) // Only include records with valid dates
+      .map(r => {
+        const recordDate = r.date || r.day
+        return {
+          date: recordDate,
+          status: r.status?.toLowerCase() === 'present' ? 1 : 0,
+          formattedDate: format(new Date(recordDate), 'MMM dd')
+        }
+      })
       .sort((a, b) => new Date(a.date) - new Date(b.date))
     
     return {
       present,
       absent,
       late,
+      leave,
       total,
       percentage,
-      trendData
+      trendData: trendData || []
     }
   }, [selectedIntern, attendanceData])
 
@@ -250,7 +278,7 @@ export default function AttendanceDashboard() {
     )
   }, [interns, internSearch])
 
-  // Export to CSV
+  // Export to CSV - SAFE HANDLING
   const exportToCSV = () => {
     if (!attendanceData || attendanceData.length === 0) {
       alert('No attendance data to export')
@@ -258,16 +286,18 @@ export default function AttendanceDashboard() {
     }
     
     const headers = ['Date', 'Intern Name', 'Batch', 'Status']
-    const rows = attendanceData.map(record => {
-      const intern = internMap[record.user_id]
-      const batch = intern ? batchMap[intern.batch_id] : null
-      return [
-        record.date || record.day || 'N/A',
-        record.intern_name || intern?.name || 'Unknown',
-        record.batch_name || batch?.name || 'Unassigned',
-        record.status || 'Unknown'
-      ]
-    })
+    const rows = attendanceData
+      .filter(record => record) // Filter out null/undefined
+      .map(record => {
+        const intern = internMap[record.user_id]
+        const batch = intern ? batchMap[intern.batch_id] : null
+        return [
+          record.date || record.day || 'N/A',
+          record.intern_name || intern?.name || 'Unknown',
+          record.batch_name || batch?.name || 'Unassigned',
+          record.status || 'Unknown'
+        ]
+      })
     
     const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv' })
@@ -393,6 +423,7 @@ export default function AttendanceDashboard() {
               <option value="present">Present</option>
               <option value="absent">Absent</option>
               <option value="late">Late</option>
+              <option value="leave">Leave</option>
             </select>
           </div>
           <div>
@@ -458,6 +489,7 @@ export default function AttendanceDashboard() {
                 <Bar dataKey="present" fill={COLORS.present} name="Present" />
                 <Bar dataKey="absent" fill={COLORS.absent} name="Absent" />
                 <Bar dataKey="late" fill={COLORS.late} name="Late" />
+                <Bar dataKey="leave" fill="#3b82f6" name="Leave" />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -519,6 +551,10 @@ export default function AttendanceDashboard() {
                     <stop offset="5%" stopColor={COLORS.late} stopOpacity={0.8}/>
                     <stop offset="95%" stopColor={COLORS.late} stopOpacity={0}/>
                   </linearGradient>
+                  <linearGradient id="colorLeave" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="formattedDate" tick={{ fontSize: 11 }} />
@@ -528,6 +564,7 @@ export default function AttendanceDashboard() {
                 <Area type="monotone" dataKey="present" stroke={COLORS.present} fillOpacity={1} fill="url(#colorPresent)" name="Present" />
                 <Area type="monotone" dataKey="absent" stroke={COLORS.absent} fillOpacity={1} fill="url(#colorAbsent)" name="Absent" />
                 <Area type="monotone" dataKey="late" stroke={COLORS.late} fillOpacity={1} fill="url(#colorLate)" name="Late" />
+                <Area type="monotone" dataKey="leave" stroke="#3b82f6" fillOpacity={1} fill="url(#colorLeave)" name="Leave" />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
@@ -564,7 +601,7 @@ export default function AttendanceDashboard() {
           
           {individualInternData && (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div className="card bg-green-50 border-green-200">
                   <div className="text-xs uppercase tracking-wider text-green-700 font-semibold">Present</div>
                   <div className="text-3xl font-black text-green-600 mt-2">{individualInternData.present}</div>
@@ -576,6 +613,10 @@ export default function AttendanceDashboard() {
                 <div className="card bg-amber-50 border-amber-200">
                   <div className="text-xs uppercase tracking-wider text-amber-700 font-semibold">Late</div>
                   <div className="text-3xl font-black text-amber-600 mt-2">{individualInternData.late}</div>
+                </div>
+                <div className="card bg-blue-50 border-blue-200">
+                  <div className="text-xs uppercase tracking-wider text-blue-700 font-semibold">Leave</div>
+                  <div className="text-3xl font-black text-blue-600 mt-2">{individualInternData.leave}</div>
                 </div>
                 <div className="card bg-purple-50 border-purple-200">
                   <div className="text-xs uppercase tracking-wider text-purple-700 font-semibold">Rate</div>

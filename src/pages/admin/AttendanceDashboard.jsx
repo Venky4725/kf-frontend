@@ -812,132 +812,147 @@ export default function AttendanceDashboard() {
         <SummaryCard
           label="Total Interns"
           value={summaryMetrics.totalInterns}
-          icon="👥"
-          color="from-blue-500 to-blue-600"
+          gradient="from-blue-500/90 via-blue-600/90 to-blue-700/90"
+          accentColor="bg-blue-400/20"
         />
         <SummaryCard
           label="Present Today"
           value={summaryMetrics.presentToday}
-          icon="✅"
-          color="from-green-500 to-green-600"
+          gradient="from-emerald-500/90 via-emerald-600/90 to-emerald-700/90"
+          accentColor="bg-emerald-400/20"
         />
         <SummaryCard
           label="Absent Today"
           value={summaryMetrics.absentToday}
-          icon="❌"
-          color="from-rose-500 to-rose-600"
+          gradient="from-rose-500/90 via-rose-600/90 to-rose-700/90"
+          accentColor="bg-rose-400/20"
         />
         <SummaryCard
           label="Late Today"
           value={summaryMetrics.lateToday}
-          icon="⏰"
-          color="from-amber-500 to-amber-600"
+          gradient="from-amber-500/90 via-amber-600/90 to-amber-700/90"
+          accentColor="bg-amber-400/20"
         />
         <SummaryCard
           label="Attendance Rate"
           value={`${summaryMetrics.attendancePercentage}%`}
-          icon="📊"
-          color="from-purple-500 to-purple-600"
+          gradient="from-purple-500/90 via-purple-600/90 to-purple-700/90"
+          accentColor="bg-purple-400/20"
         />
       </section>
 
       {/* Charts Grid */}
       <section className="grid lg:grid-cols-2 gap-6">
         {/* Batch-wise Analytics */}
-        <div className="card">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Batch-wise Attendance</h2>
-          {batchAnalytics.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={batchAnalytics}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="present" fill={COLORS.present} name="Present" />
-                <Bar dataKey="absent" fill={COLORS.absent} name="Absent" />
-                <Bar dataKey="late" fill={COLORS.late} name="Late" />
-                <Bar dataKey="leave" fill="#3b82f6" name="Leave" />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState message="No batch data available" />
-          )}
-        </div>
-
-        {/* Attendance Distribution - FIXED: Use Legend to avoid label overlap */}
-        <div className="card">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Attendance Distribution</h2>
-          {distributionData.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={250}>
-                <PieChart>
-                  <Pie
-                    data={distributionData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={false}
-                    outerRadius={90}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {distributionData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value, name, props) => [`${value} (${props.payload.percentage}%)`, name]} />
-                  <Legend 
-                    verticalAlign="bottom" 
-                    height={36}
-                    formatter={(value, entry) => `${value}: ${entry.payload.value} (${entry.payload.percentage}%)`}
-                  />
-                </PieChart>
+        <div className="relative overflow-hidden rounded-2xl bg-white shadow-lg border border-slate-200/60 transition-all duration-300 hover:shadow-xl">
+          {/* Subtle gradient overlay */}
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-50/50 via-transparent to-transparent pointer-events-none"></div>
+          
+          <div className="relative p-6">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Batch-wise Attendance</h2>
+            {batchAnalytics.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={batchAnalytics}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="present" fill={COLORS.present} name="Present" />
+                  <Bar dataKey="absent" fill={COLORS.absent} name="Absent" />
+                  <Bar dataKey="late" fill={COLORS.late} name="Late" />
+                  <Bar dataKey="leave" fill="#3b82f6" name="Leave" />
+                </BarChart>
               </ResponsiveContainer>
-            </>
-          ) : (
-            <EmptyState message="No distribution data available" />
-          )}
+            ) : (
+              <EmptyState message="No batch data available" />
+            )}
+          </div>
         </div>
 
-        {/* Attendance Trends - FIXED: Use formatted dates */}
-        <div className="card lg:col-span-2">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Attendance Trends Over Time</h2>
-          {trendData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={trendData}>
-                <defs>
-                  <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.present} stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor={COLORS.present} stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorAbsent" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.absent} stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor={COLORS.absent} stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorLate" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.late} stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor={COLORS.late} stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorLeave" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="formattedDate" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Legend />
-                <Area type="monotone" dataKey="present" stroke={COLORS.present} fillOpacity={1} fill="url(#colorPresent)" name="Present" />
-                <Area type="monotone" dataKey="absent" stroke={COLORS.absent} fillOpacity={1} fill="url(#colorAbsent)" name="Absent" />
-                <Area type="monotone" dataKey="late" stroke={COLORS.late} fillOpacity={1} fill="url(#colorLate)" name="Late" />
-                <Area type="monotone" dataKey="leave" stroke="#3b82f6" fillOpacity={1} fill="url(#colorLeave)" name="Leave" />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState message="No trend data available" />
-          )}
+        {/* Attendance Distribution */}
+        <div className="relative overflow-hidden rounded-2xl bg-white shadow-lg border border-slate-200/60 transition-all duration-300 hover:shadow-xl">
+          {/* Subtle gradient overlay */}
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-50/50 via-transparent to-transparent pointer-events-none"></div>
+          
+          <div className="relative p-6">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Attendance Distribution</h2>
+            {distributionData.length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height={250}>
+                  <PieChart>
+                    <Pie
+                      data={distributionData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={false}
+                      outerRadius={90}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {distributionData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value, name, props) => [`${value} (${props.payload.percentage}%)`, name]} />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36}
+                      formatter={(value, entry) => `${value}: ${entry.payload.value} (${entry.payload.percentage}%)`}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </>
+            ) : (
+              <EmptyState message="No distribution data available" />
+            )}
+          </div>
+        </div>
+
+        {/* Attendance Trends */}
+        <div className="relative overflow-hidden rounded-2xl bg-white shadow-lg border border-slate-200/60 transition-all duration-300 hover:shadow-xl lg:col-span-2">
+          {/* Subtle gradient overlay */}
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-50/50 via-transparent to-transparent pointer-events-none"></div>
+          
+          <div className="relative p-6">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Attendance Trends Over Time</h2>
+            {trendData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={trendData}>
+                  <defs>
+                    <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS.present} stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor={COLORS.present} stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorAbsent" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS.absent} stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor={COLORS.absent} stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorLate" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS.late} stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor={COLORS.late} stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorLeave" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="formattedDate" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Area type="monotone" dataKey="present" stroke={COLORS.present} fillOpacity={1} fill="url(#colorPresent)" name="Present" />
+                  <Area type="monotone" dataKey="absent" stroke={COLORS.absent} fillOpacity={1} fill="url(#colorAbsent)" name="Absent" />
+                  <Area type="monotone" dataKey="late" stroke={COLORS.late} fillOpacity={1} fill="url(#colorLate)" name="Late" />
+                  <Area type="monotone" dataKey="leave" stroke="#3b82f6" fillOpacity={1} fill="url(#colorLeave)" name="Leave" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState message="No trend data available" />
+            )}
+          </div>
         </div>
       </section>
 
@@ -946,16 +961,35 @@ export default function AttendanceDashboard() {
 }
 
 // Reusable Components
-function SummaryCard({ label, value, icon, color }) {
+function SummaryCard({ label, value, gradient, accentColor }) {
   return (
-    <div className={`card bg-gradient-to-br ${color} text-white`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-wider opacity-90 font-semibold">{label}</div>
-          <div className="text-3xl font-black mt-2">{value}</div>
+    <div className="group relative overflow-hidden rounded-2xl transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl">
+      {/* Glassmorphism background with gradient */}
+      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-95`}></div>
+      
+      {/* Glossy top reflection */}
+      <div className="absolute inset-0 bg-gradient-to-b from-white/20 via-transparent to-transparent opacity-60"></div>
+      
+      {/* Subtle border */}
+      <div className="absolute inset-0 rounded-2xl border border-white/20"></div>
+      
+      {/* Content */}
+      <div className="relative px-6 py-5">
+        {/* Accent decoration */}
+        <div className={`absolute top-0 right-0 w-24 h-24 ${accentColor} rounded-full blur-3xl opacity-40 group-hover:opacity-60 transition-opacity duration-300`}></div>
+        
+        <div className="relative">
+          <div className="text-xs uppercase tracking-wider text-white/80 font-semibold mb-2">
+            {label}
+          </div>
+          <div className="text-4xl font-black text-white drop-shadow-lg">
+            {value}
+          </div>
         </div>
-        <div className="text-4xl opacity-80">{icon}</div>
       </div>
+      
+      {/* Bottom shine effect */}
+      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"></div>
     </div>
   )
 }

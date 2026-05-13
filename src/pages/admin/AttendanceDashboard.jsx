@@ -17,6 +17,8 @@ const COLORS = {
 }
 
 export default function AttendanceDashboard() {
+  console.log('🎯 AttendanceDashboard component mounting...')
+  
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -26,10 +28,26 @@ export default function AttendanceDashboard() {
   const [interns, setInterns] = useState([])
   const [batches, setBatches] = useState([])
   
-  // Filter states
-  const [dateRange, setDateRange] = useState({
-    start: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
-    end: format(new Date(), 'yyyy-MM-dd')
+  // Filter states - SAFE INITIALIZATION
+  const [dateRange, setDateRange] = useState(() => {
+    try {
+      const end = new Date()
+      const start = subDays(end, 30)
+      return {
+        start: format(start, 'yyyy-MM-dd'),
+        end: format(end, 'yyyy-MM-dd')
+      }
+    } catch (err) {
+      console.error('❌ Error initializing dateRange:', err)
+      // Fallback to manual date calculation
+      const end = new Date()
+      const start = new Date(end)
+      start.setDate(start.getDate() - 30)
+      return {
+        start: start.toISOString().split('T')[0],
+        end: end.toISOString().split('T')[0]
+      }
+    }
   })
   const [batchFilter, setBatchFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -37,6 +55,8 @@ export default function AttendanceDashboard() {
   const [selectedIntern, setSelectedIntern] = useState('')
   
   const isAdmin = user?.role === 'ADMIN'
+  
+  console.log('✅ AttendanceDashboard state initialized', { dateRange, isAdmin })
 
   // Load data with proper error handling and debugging
   const loadData = useCallback(async () => {
@@ -87,16 +107,22 @@ export default function AttendanceDashboard() {
   }, [loadData])
 
   // Create lookup maps for efficient data access
+  console.log('📍 Before internMap useMemo', { interns })
   const internMap = useMemo(() => {
+    console.log('🔄 Inside internMap useMemo')
     return Object.fromEntries((interns || []).map(intern => [intern.id, intern]))
   }, [interns])
 
+  console.log('📍 Before batchMap useMemo', { batches })
   const batchMap = useMemo(() => {
+    console.log('🔄 Inside batchMap useMemo')
     return Object.fromEntries((batches || []).map(batch => [batch.id, batch]))
   }, [batches])
 
   // Calculate summary metrics - SAFE HANDLING
+  console.log('📍 Before summaryMetrics useMemo')
   const summaryMetrics = useMemo(() => {
+    console.log('🔄 Inside summaryMetrics useMemo')
     const today = format(new Date(), 'yyyy-MM-dd')
     const todayRecords = (attendanceData || []).filter(r => {
       const recordDate = r?.date || r?.day
@@ -124,7 +150,9 @@ export default function AttendanceDashboard() {
   }, [attendanceData, interns])
 
   // Batch-wise analytics - SAFE HANDLING
+  console.log('📍 Before batchAnalytics useMemo')
   const batchAnalytics = useMemo(() => {
+    console.log('🔄 Inside batchAnalytics useMemo')
     const batchStatsMap = {}
     
     // Initialize batch stats
@@ -304,17 +332,38 @@ export default function AttendanceDashboard() {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `attendance_${format(new Date(), 'yyyy-MM-dd')}.csv`
+    
+    try {
+      link.download = `attendance_${format(new Date(), 'yyyy-MM-dd')}.csv`
+    } catch (err) {
+      console.error('❌ Error formatting date for CSV filename:', err)
+      link.download = `attendance_${new Date().toISOString().split('T')[0]}.csv`
+    }
+    
     link.click()
     window.URL.revokeObjectURL(url)
   }
 
   // Clear all filters
   const clearFilters = () => {
-    setDateRange({
-      start: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
-      end: format(new Date(), 'yyyy-MM-dd')
-    })
+    try {
+      const end = new Date()
+      const start = subDays(end, 30)
+      setDateRange({
+        start: format(start, 'yyyy-MM-dd'),
+        end: format(end, 'yyyy-MM-dd')
+      })
+    } catch (err) {
+      console.error('❌ Error in clearFilters:', err)
+      // Fallback
+      const end = new Date()
+      const start = new Date(end)
+      start.setDate(start.getDate() - 30)
+      setDateRange({
+        start: start.toISOString().split('T')[0],
+        end: end.toISOString().split('T')[0]
+      })
+    }
     setBatchFilter('')
     setStatusFilter('')
     setInternSearch('')

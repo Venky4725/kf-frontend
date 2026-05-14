@@ -66,7 +66,9 @@ export default function BatchManagement() {
         name: form.name.trim(),
         tech_stack: form.tech_stack.trim(),
         start_date: form.start_date,
-        team_lead_ids: form.team_lead_ids.length > 0 ? form.team_lead_ids : null,
+        first_tech_lead_id: form.team_lead_ids[0] || null,
+        second_tech_lead_id: form.team_lead_ids[1] || null,
+        third_tech_lead_id: form.team_lead_ids[2] || null,
       }
       
       await api.post('/batches', payload)
@@ -93,12 +95,9 @@ export default function BatchManagement() {
         name: editingForm.name.trim(),
         tech_stack: editingForm.tech_stack.trim(),
         start_date: editingForm.start_date,
-        team_lead_ids: editingForm.team_lead_ids && Array.isArray(editingForm.team_lead_ids) && editingForm.team_lead_ids.length > 0 ? editingForm.team_lead_ids : null,
-      }
-      
-      // DEBUG: Log the payload being sent
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Sending batch update payload:', payload)
+        first_tech_lead_id: editingForm.team_lead_ids[0] || null,
+        second_tech_lead_id: editingForm.team_lead_ids[1] || null,
+        third_tech_lead_id: editingForm.team_lead_ids[2] || null,
       }
       
       await api.put(`/batches/${id}`, payload)
@@ -356,18 +355,34 @@ export default function BatchManagement() {
                           className="text-sm text-brand-700 font-semibold" 
                           onClick={() => {
                             setEditingId(item.id)
+                            
+                            // Extract tech lead IDs from backend response
+                            let techLeadIds = []
+                            
+                            // Priority 1: technical_lead array (enriched field)
+                            if (item.technical_lead && Array.isArray(item.technical_lead)) {
+                              techLeadIds = item.technical_lead.map(tl => tl.id).filter(Boolean)
+                            }
+                            // Priority 2: technical_leads array
+                            else if (item.technical_leads && Array.isArray(item.technical_leads)) {
+                              techLeadIds = item.technical_leads.map(tl => tl.id).filter(Boolean)
+                            }
+                            // Priority 3: tech_leads array
+                            else if (item.tech_leads && Array.isArray(item.tech_leads)) {
+                              techLeadIds = item.tech_leads.map(tl => tl.id).filter(Boolean)
+                            }
+                            // Fallback: Extract from individual fields
+                            else {
+                              if (item.first_tech_lead_id) techLeadIds.push(item.first_tech_lead_id)
+                              if (item.second_tech_lead_id) techLeadIds.push(item.second_tech_lead_id)
+                              if (item.third_tech_lead_id) techLeadIds.push(item.third_tech_lead_id)
+                            }
+                            
                             setEditingForm({
                               name: item.name,
                               tech_stack: item.tech_stack,
                               start_date: item.start_date,
-                              team_lead_ids: item.team_lead_ids || 
-                                (item.team_lead_id ? [item.team_lead_id] : []) ||
-                                (item.technical_lead && Array.isArray(item.technical_lead) 
-                                  ? item.technical_lead.map(tl => tl.id) 
-                                  : []) ||
-                                (item.technical_leads && Array.isArray(item.technical_leads) 
-                                  ? item.technical_leads.map(tl => tl.id) 
-                                  : []),
+                              team_lead_ids: techLeadIds,
                             })
                           }}
                         >

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
+import React from 'react'
 
 import api from '../../lib/api'
 
@@ -8,6 +9,7 @@ export default function WeeklyPlans() {
   const [tasks, setTasks] = useState([])
   const [batches, setBatches] = useState([])
   const [allUsers, setAllUsers] = useState([])
+  const [interns, setInterns] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
   const [selectedBatch, setSelectedBatch] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
@@ -16,6 +18,18 @@ export default function WeeklyPlans() {
   const [editingForm, setEditingForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  
+  // Filter interns by selected batch for assignee dropdown
+  const filteredInterns = React.useMemo(() => {
+    if (!form.batch_id) return []
+    return interns.filter(intern => String(intern.batch_id) === String(form.batch_id))
+  }, [interns, form.batch_id])
+  
+  // Filter interns for editing form
+  const filteredInternsForEdit = React.useMemo(() => {
+    if (!editingForm.batch_id) return []
+    return interns.filter(intern => String(intern.batch_id) === String(editingForm.batch_id))
+  }, [interns, editingForm.batch_id])
 
   async function load() {
     try {
@@ -26,21 +40,24 @@ export default function WeeklyPlans() {
         params.order = sortOrder
       }
       
-      const [taskList, batchList, userList] = await Promise.all([
+      const [taskList, batchList, userList, internList] = await Promise.all([
         api.get('/tasks', { params }),
         api.get('/batches', { params: { limit: 500 } }),
         api.get('/profiles', { params: { limit: 500 } }),
+        api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
       ])
       setTasks(taskList.data || [])
       setBatches(batchList.data || [])
       setAllUsers(userList.data || [])
+      setInterns(internList.data || [])
       setError('')
     } catch (err) {
-      console.error('Failed to load tasks:', err)
+      console.error('❌ Failed to load tasks:', err)
       setError(err.response?.data?.detail || 'Failed to load tasks.')
       setTasks([])
       setBatches([])
       setAllUsers([])
+      setInterns([])
     }
   }
 
@@ -139,7 +156,7 @@ export default function WeeklyPlans() {
           <select 
             className="input" 
             value={form.batch_id} 
-            onChange={(e) => setForm({ ...form, batch_id: e.target.value })} 
+            onChange={(e) => setForm({ ...form, batch_id: e.target.value, assigned_to: '' })} 
             required
           >
             <option value="">Select batch *</option>
@@ -149,14 +166,18 @@ export default function WeeklyPlans() {
             className="input" 
             value={form.assigned_to} 
             onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}
+            disabled={!form.batch_id}
           >
             <option value="">All batch members</option>
-            {allUsers.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name} ({user.role})
+            {filteredInterns.map((intern) => (
+              <option key={intern.id} value={intern.id}>
+                {intern.name}
               </option>
             ))}
           </select>
+          {!form.batch_id && (
+            <p className="text-xs text-slate-500 mt-1">Select a batch first to see interns</p>
+          )}
           <input 
             className="input" 
             type="date" 

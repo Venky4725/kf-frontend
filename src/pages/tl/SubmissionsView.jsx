@@ -6,8 +6,9 @@ import api from '../../lib/api'
 export default function SubmissionsView() {
   const { user } = useAuth()
   const [interns, setInterns] = useState([])
+  const [batches, setBatches] = useState([])
   const [submissions, setSubmissions] = useState([])
-  const [filters, setFilters] = useState({ user_id: '', submitted_for: '' })
+  const [filters, setFilters] = useState({ batch_id: '', user_id: '', submitted_for: '' })
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('submitted_for')
   const [sortOrder, setSortOrder] = useState('desc')
@@ -16,31 +17,40 @@ export default function SubmissionsView() {
   const [loading, setLoading] = useState(true)
 
   const internMap = useMemo(() => Object.fromEntries(interns.map((intern) => [intern.id, intern])), [interns])
+  const batchMap = useMemo(() => Object.fromEntries(batches.map((batch) => [batch.id, batch])), [batches])
+  
+  // Filter interns by selected batch
+  const filteredInterns = useMemo(() => {
+    if (!filters.batch_id) return interns
+    return interns.filter(intern => String(intern.batch_id) === String(filters.batch_id))
+  }, [interns, filters.batch_id])
 
-  // Load interns once on mount
+  // Load interns and batches once on mount
   useEffect(() => {
-    async function loadInterns() {
+    async function loadData() {
       if (!user?.id) return
       
       try {
-        const [profiles, batches] = await Promise.all([
+        const [profiles, batchesRes] = await Promise.all([
           api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
-          // Backend now filters batches for Tech Lead automatically
-          user?.role === 'TECHNICAL_LEAD'
-            ? api.get('/batches', { params: { limit: 500 } })
-            : Promise.resolve({ data: [] }),
+          api.get('/batches', { params: { limit: 500 } }),
         ])
+        
+        // For Tech Lead, filter to assigned batches only
         if (user?.role === 'TECHNICAL_LEAD') {
-          const allowedBatchIds = new Set(batches.data.map((batch) => batch.id))
+          const allowedBatchIds = new Set(batchesRes.data.map((batch) => batch.id))
+          setBatches(batchesRes.data)
           setInterns(profiles.data.filter((intern) => allowedBatchIds.has(intern.batch_id)))
         } else {
+          setBatches(batchesRes.data)
           setInterns(profiles.data)
         }
       } catch (err) {
-        setError(err.response?.data?.detail || 'Failed to load intern profiles.')
+        console.error('❌ Failed to load data:', err)
+        setError(err.response?.data?.detail || 'Failed to load data.')
       }
     }
-    loadInterns()
+    loadData()
   }, [user])
 
   // Load submissions after interns are loaded
@@ -114,7 +124,7 @@ export default function SubmissionsView() {
 
       {/* Search and Filters */}
       <div className="card">
-        <div className="grid md:grid-cols-4 gap-4">
+        <div className="grid md:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Search</label>
             <input
@@ -126,6 +136,21 @@ export default function SubmissionsView() {
             />
           </div>
           <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Filter by Batch</label>
+            <select 
+              className="input" 
+              value={filters.batch_id} 
+              onChange={(e) => {
+                setFilters({ ...filters, batch_id: e.target.value, user_id: '' })
+              }}
+            >
+              <option value="">All batches</option>
+              {batches.map((batch) => (
+                <option key={batch.id} value={batch.id}>{batch.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Filter by Intern</label>
             <select 
               className="input" 
@@ -133,7 +158,7 @@ export default function SubmissionsView() {
               onChange={(e) => setFilters({ ...filters, user_id: e.target.value })}
             >
               <option value="">All interns</option>
-              {interns.map((intern) => (
+              {filteredInterns.map((intern) => (
                 <option key={intern.id} value={intern.id}>{intern.name}</option>
               ))}
             </select>
@@ -163,27 +188,37 @@ export default function SubmissionsView() {
         ) : submissions.length === 0 ? (
           <div className="card text-slate-500">No submissions found.</div>
         ) : (
-          submissions.map((item) => (
-            <div key={item.id} className="card">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold text-slate-900">
-                      {item.submitted_by_name || internMap[item.user_id]?.name || item.user_id}
+          submissions.map((item) => {
+            const intern = internMap[item.user_id]
+            const batchName = intern ? batchMap[intern.batch_id]?.name || 'Unassigned' : 'Unknown'
+            
+            return (
+              <div key={item.id} className="card">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-semibold text-slate-900">
+                          {item.submitted_by_name || intern?.name || item.user_id}
+                        </div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          Batch: {batchName}
+                        </div>
+                      </div>
+                      <div className="text-xs text-slate-400">{item.submitted_for}</div>
                     </div>
-                    <div className="text-xs text-slate-400">{item.submitted_for}</div>
+                    <div className="text-sm text-slate-700 mt-3 whitespace-pre-wrap">{item.content}</div>
                   </div>
-                  <div className="text-sm text-slate-700 mt-3 whitespace-pre-wrap">{item.content}</div>
+                  <button
+                    onClick={() => deleteSubmission(item.id)}
+                    className="px-3 py-1.5 text-sm font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-all duration-200 shrink-0"
+                  >
+                    Delete
+                  </button>
                 </div>
-                <button
-                  onClick={() => deleteSubmission(item.id)}
-                  className="px-3 py-1.5 text-sm font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-all duration-200 shrink-0"
-                >
-                  Delete
-                </button>
               </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
     </div>

@@ -32,7 +32,7 @@ export default function InternManagement() {
       const { data } = await api.get('/batches', { params: { limit: 500 } })
       setBatches(data)
     } catch (err) {
-      console.error('Failed to load batches:', err)
+      console.error('❌ Failed to load batches:', err)
     }
   }
 
@@ -58,7 +58,20 @@ export default function InternManagement() {
       setInterns(data)
       setError('')
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to load intern profiles.')
+      console.error('❌ Failed to load interns:', err)
+      
+      // Detect CORS/Network failures
+      if (!err.response) {
+        if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+          setError('❌ Backend connection failed. Please check if the server is running and CORS is configured.')
+        } else if (err.message?.includes('CORS')) {
+          setError('❌ CORS error: Backend is blocking requests from this origin.')
+        } else {
+          setError('❌ Network error: Unable to reach the backend server.')
+        }
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load intern profiles.')
+      }
     } finally {
       setLoading(false)
     }
@@ -127,6 +140,20 @@ export default function InternManagement() {
       await load()
     } catch (err) {
       console.error('❌ Failed to create intern:', err)
+      
+      // Detect CORS/Network failures
+      if (!err.response) {
+        if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+          setError('❌ Backend connection failed. Please check if the server is running and CORS is configured.')
+          return
+        }
+        if (err.message?.includes('CORS')) {
+          setError('❌ CORS error: Backend is blocking requests from this origin. Contact your administrator.')
+          return
+        }
+        setError('❌ Network error: Unable to reach the backend server.')
+        return
+      }
       
       // Extract human-readable error message
       let errorMsg = 'Failed to create intern profile.'
@@ -336,7 +363,13 @@ export default function InternManagement() {
   }
 
   function batchName(batchId) {
-    return batches.find((batch) => batch.id === batchId)?.name || 'Unassigned'
+    if (!batchId) return 'Unassigned'
+    
+    // Normalize ID for comparison (handle both string and number)
+    const normalizedId = String(batchId)
+    const batch = batches.find((b) => String(b.id) === normalizedId)
+    
+    return batch?.name || 'Unassigned'
   }
 
   // Role-based access control

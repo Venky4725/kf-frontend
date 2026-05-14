@@ -22,7 +22,19 @@ export default function TLManagement() {
       setError('')
     } catch (err) {
       console.error('❌ Failed to load technical leads:', err)
-      setError(err.response?.data?.detail || 'Failed to load technical lead profiles.')
+      
+      // Detect CORS/Network failures
+      if (!err.response) {
+        if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+          setError('❌ Backend connection failed. Please check if the server is running and CORS is configured.')
+        } else if (err.message?.includes('CORS')) {
+          setError('❌ CORS error: Backend is blocking requests from this origin.')
+        } else {
+          setError('❌ Network error: Unable to reach the backend server.')
+        }
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load technical lead profiles.')
+      }
     }
   }
 
@@ -255,18 +267,13 @@ export default function TLManagement() {
   const activeTLs = tls.filter(tl => tl.is_active)
 
   function batchName(batchId) {
-    if (!batchId) {
-      return 'Unassigned'
-    }
+    if (!batchId) return 'Unassigned'
     
-    const batch = batches.find((b) => b.id === batchId)
+    // Normalize ID for comparison (handle both string and number)
+    const normalizedId = String(batchId)
+    const batch = batches.find((b) => String(b.id) === normalizedId)
     
-    if (!batch) {
-      console.warn('⚠️ Batch not found for batch_id:', batchId)
-      return 'Unassigned'
-    }
-    
-    return batch.name
+    return batch?.name || 'Unassigned'
   }
 
   return (

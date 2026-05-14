@@ -33,7 +33,20 @@ export default function BatchManagement() {
       setError('')
     } catch (err) {
       console.error('❌ Failed to load batches:', err)
-      setError(err.response?.data?.detail || 'Failed to load batches.')
+      
+      // Detect CORS/Network failures
+      if (!err.response) {
+        if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+          setError('❌ Backend connection failed. Please check if the server is running and CORS is configured.')
+        } else if (err.message?.includes('CORS')) {
+          setError('❌ CORS error: Backend is blocking requests from this origin.')
+        } else {
+          setError('❌ Network error: Unable to reach the backend server.')
+        }
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load batches.')
+      }
+      
       setBatches([])
       setTls([])
     } finally {
@@ -123,7 +136,7 @@ export default function BatchManagement() {
     if (!batch) return 'Unassigned'
     
     // PRIORITY 1: Use enriched tech_leads_display field from backend (NEW)
-    if (batch.tech_leads_display && typeof batch.tech_leads_display === 'string') {
+    if (batch.tech_leads_display && typeof batch.tech_leads_display === 'string' && batch.tech_leads_display.trim()) {
       return batch.tech_leads_display
     }
     
@@ -143,17 +156,24 @@ export default function BatchManagement() {
       return names.length > 0 ? names.join(' / ') : 'Unassigned'
     }
     
-    // FALLBACK: Use team_lead_ids with local lookup (legacy)
+    // FALLBACK: Use team_lead_ids with local lookup (legacy) - NORMALIZE IDs
     if (batch.team_lead_ids && Array.isArray(batch.team_lead_ids) && batch.team_lead_ids.length > 0) {
       const names = batch.team_lead_ids
-        .map(id => tlMap[id]?.name)
+        .map(id => {
+          // Normalize ID for comparison
+          const normalizedId = String(id)
+          const tl = tls.find(t => String(t.id) === normalizedId)
+          return tl?.name
+        })
         .filter(Boolean)
       return names.length > 0 ? names.join(' / ') : 'Unassigned'
     }
     
-    // LEGACY: Single tech lead ID
+    // LEGACY: Single tech lead ID - NORMALIZE ID
     if (batch.team_lead_id) {
-      return tlMap[batch.team_lead_id]?.name || 'Unassigned'
+      const normalizedId = String(batch.team_lead_id)
+      const tl = tls.find(t => String(t.id) === normalizedId)
+      return tl?.name || 'Unassigned'
     }
     
     return 'Unassigned'

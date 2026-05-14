@@ -72,8 +72,21 @@ export default function AttendanceAdmin() {
       setBatches(batchesRes.data || [])
       setInterns(internsRes.data || [])
     } catch (err) {
-      console.error('Failed to load attendance:', err)
-      setError(err.response?.data?.detail || 'Failed to load attendance records.')
+      console.error('❌ Failed to load attendance:', err)
+      
+      // Detect CORS/Network failures
+      if (!err.response) {
+        if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+          setError('❌ Backend connection failed. Please check if the server is running and CORS is configured.')
+        } else if (err.message?.includes('CORS')) {
+          setError('❌ CORS error: Backend is blocking requests from this origin.')
+        } else {
+          setError('❌ Network error: Unable to reach the backend server.')
+        }
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load attendance records.')
+      }
+      
       setAttendance([])
       setBatches([])
       setInterns([])

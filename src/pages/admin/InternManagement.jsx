@@ -126,7 +126,7 @@ export default function InternManagement() {
         email: form.email.trim().toLowerCase(),
         tech_stack: form.tech_stack.trim() || null,
         role: 'INTERN',
-        batch_id: parseInt(form.batch_id, 10),
+        batch_id: form.batch_id,
       }
       
       const response = await api.post('/profiles', payload)
@@ -201,7 +201,7 @@ export default function InternManagement() {
         name: editingForm.name.trim(),
         email: editingForm.email.trim().toLowerCase(),
         tech_stack: editingForm.tech_stack?.trim() || null,
-        batch_id: editingForm.batch_id ? parseInt(editingForm.batch_id, 10) : null,
+        batch_id: editingForm.batch_id ? editingForm.batch_id : null,
       }
       
       await api.put(`/profiles/${id}`, payload)

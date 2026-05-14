@@ -176,6 +176,11 @@ export default function BatchManagement() {
       return tl?.name || 'Unassigned'
     }
     
+    // Final fallback to prevent displaying "Unassigned" when data already exists
+    if (batch.technical_lead && Array.isArray(batch.technical_lead) && batch.technical_lead.length > 0) {
+      return batch.technical_lead.map(tl => tl?.name).filter(Boolean).join(' / ')
+    }
+    
     return 'Unassigned'
   }
 

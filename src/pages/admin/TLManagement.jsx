@@ -12,15 +12,16 @@ export default function TLManagement() {
   const [editingId, setEditingId] = useState(null)
   const [editingForm, setEditingForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [fieldErrors, setFieldErrors] = useState({})
 
   async function load() {
     try {
       const { data } = await api.get('/profiles', { params: { role: 'TECHNICAL_LEAD', limit: 500 } })
-      console.log('👥 Tech Leads API Response:', data)
       setTls(data)
       setError('')
     } catch (err) {
+      console.error('❌ Failed to load technical leads:', err)
       setError(err.response?.data?.detail || 'Failed to load technical lead profiles.')
     }
   }
@@ -28,10 +29,9 @@ export default function TLManagement() {
   async function loadBatches() {
     try {
       const { data } = await api.get('/batches', { params: { limit: 500 } })
-      console.log('📚 Batches API Response:', data)
       setBatches(data)
     } catch (err) {
-      console.error('Failed to load batches:', err)
+      console.error('❌ Failed to load batches:', err)
     }
   }
 
@@ -90,7 +90,7 @@ export default function TLManagement() {
         email: normalizedEmail,
         tech_stack: form.tech_stack.trim() || null,
         role: 'TECHNICAL_LEAD',
-        batch_id: form.batch_id || null  // Convert empty string to null
+        batch_id: form.batch_id || null
       }
       
       await api.post('/profiles', payload)
@@ -99,20 +99,23 @@ export default function TLManagement() {
       setForm(EMPTY_FORM)
       setError('')
       setFieldErrors({})
+      setSuccess('✅ Technical lead created successfully!')
+      setTimeout(() => setSuccess(''), 3000)
+      
+      // Immediate refetch to update UI
       await load()
     } catch (err) {
+      console.error('❌ Failed to create technical lead:', err)
+      
       // Extract error message from backend
       const errorMsg = err.response?.data?.detail || 'Failed to create technical lead profile.'
       
       // Handle different error types
       if (err.response?.status === 409) {
-        // Conflict - likely duplicate email
         setError(`❌ ${errorMsg}`)
       } else if (err.response?.status === 400) {
-        // Bad request - validation error
         setError(`⚠️ ${errorMsg}`)
       } else {
-        // Other errors
         setError(`❌ ${errorMsg}`)
       }
     }
@@ -120,6 +123,7 @@ export default function TLManagement() {
 
   async function saveProfile(id) {
     setError('')
+    setSuccess('')
     setFieldErrors({})
     
     // Validate all fields
@@ -183,20 +187,23 @@ export default function TLManagement() {
       setEditingForm(EMPTY_FORM)
       setError('')
       setFieldErrors({})
+      setSuccess('✅ Technical lead updated successfully!')
+      setTimeout(() => setSuccess(''), 3000)
+      
+      // Immediate refetch to update UI
       await load()
     } catch (err) {
+      console.error('❌ Failed to update technical lead:', err)
+      
       // Extract error message from backend
       const errorMsg = err.response?.data?.detail || 'Failed to update profile.'
       
       // Handle different error types
       if (err.response?.status === 409) {
-        // Conflict - likely duplicate email
         setError(`❌ ${errorMsg}`)
       } else if (err.response?.status === 400) {
-        // Bad request - validation error
         setError(`⚠️ ${errorMsg}`)
       } else {
-        // Other errors
         setError(`❌ ${errorMsg}`)
       }
     }
@@ -211,9 +218,15 @@ export default function TLManagement() {
     try {
       await api.patch(`/profiles/${id}/deactivate`)
       setError('')
-      load()
+      setSuccess('✅ Technical lead deactivated successfully!')
+      setTimeout(() => setSuccess(''), 3000)
+      
+      // Immediate refetch to update UI
+      await load()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to deactivate profile.')
+      console.error('❌ Failed to deactivate profile:', err)
+      const errorMsg = err.response?.data?.detail || 'Failed to deactivate profile.'
+      setError(`❌ ${errorMsg}`)
     }
   }
   
@@ -226,9 +239,15 @@ export default function TLManagement() {
     try {
       await api.patch(`/profiles/${id}/activate`)
       setError('')
-      load()
+      setSuccess('✅ Technical lead activated successfully!')
+      setTimeout(() => setSuccess(''), 3000)
+      
+      // Immediate refetch to update UI
+      await load()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to activate profile.')
+      console.error('❌ Failed to activate profile:', err)
+      const errorMsg = err.response?.data?.detail || 'Failed to activate profile.'
+      setError(`❌ ${errorMsg}`)
     }
   }
   
@@ -258,6 +277,7 @@ export default function TLManagement() {
       </div>
 
       {error && <div className="card border border-rose-200 bg-rose-50 text-rose-700">{error}</div>}
+      {success && <div className="card border border-green-200 bg-green-50 text-green-700">{success}</div>}
 
       <form onSubmit={createProfile} className="card space-y-4">
         <div className="grid md:grid-cols-2 gap-4">

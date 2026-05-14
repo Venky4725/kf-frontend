@@ -296,16 +296,6 @@ export default function AttendanceAdmin() {
   
   // Filtered history records with separate controls
   const filteredHistoryRecords = useMemo(() => {
-    console.log('=== FILTERING HISTORY RECORDS ===')
-    console.log('Total records:', enhancedAttendance.length)
-    console.log('History filters:', {
-      startDate: historyStartDate,
-      endDate: historyEndDate,
-      batch: historyBatchFilter,
-      status: historyStatusFilter,
-      search: historySearchQuery
-    })
-    
     let filtered = [...enhancedAttendance]
     
     // Date range filter
@@ -321,7 +311,6 @@ export default function AttendanceAdmin() {
         
         return true
       })
-      console.log('After date filter:', filtered.length)
     }
     
     // Batch filter
@@ -337,7 +326,6 @@ export default function AttendanceAdmin() {
         
         return matches
       })
-      console.log('After batch filter:', filtered.length)
     }
     
     // Status filter
@@ -345,7 +333,6 @@ export default function AttendanceAdmin() {
       filtered = filtered.filter(record => {
         return record.status?.toLowerCase() === historyStatusFilter.toLowerCase()
       })
-      console.log('After status filter:', filtered.length)
     }
     
     // Search filter
@@ -358,10 +345,8 @@ export default function AttendanceAdmin() {
         
         return nameMatch || emailMatch || batchMatch
       })
-      console.log('After search filter:', filtered.length)
     }
     
-    console.log('Final filtered history:', filtered.length)
     return filtered
   }, [enhancedAttendance, historyStartDate, historyEndDate, historyBatchFilter, historyStatusFilter, historySearchQuery])
   
@@ -378,22 +363,13 @@ export default function AttendanceAdmin() {
 
   // Filtered interns for marking attendance - FIXED: Proper batch comparison
   const filteredInterns = useMemo(() => {
-    console.log('=== FILTERING INTERNS FOR MARKING ===')
-    console.log('Total interns:', interns.length)
-    console.log('batchFilter:', batchFilter, typeof batchFilter)
-    console.log('searchQuery:', searchQuery)
-    console.log('dateFilter:', dateFilter)
-    
     return interns.filter(intern => {
       if (!intern) return false
       
       // Apply search filter
       if (searchQuery) {
         const matchesSearch = intern.name?.toLowerCase().includes(searchQuery.toLowerCase())
-        if (!matchesSearch) {
-          console.log('Filtered out by search:', intern.name)
-          return false
-        }
+        if (!matchesSearch) return false
       }
       
       // Apply batch filter - FIXED: Handle type coercion properly
@@ -408,10 +384,7 @@ export default function AttendanceAdmin() {
         
         const matches = exactMatch || stringMatch || numberMatch
         
-        if (!matches) {
-          console.log('Filtered out by batch:', intern.name, 'intern.batch_id:', internBatchId, 'filter:', filterBatchId)
-          return false
-        }
+        if (!matches) return false
       }
       
       // Hide interns who already have attendance marked for selected date
@@ -421,29 +394,9 @@ export default function AttendanceAdmin() {
       })
       
       // Only show interns without attendance for the selected date
-      if (hasAttendance) {
-        console.log('Already marked:', intern.name)
-        return false
-      }
-      
-      return true
+      return !hasAttendance
     })
   }, [interns, searchQuery, batchFilter, attendance, dateFilter])
-  
-  // Log filtered results
-  React.useEffect(() => {
-    console.log('=== FILTERED INTERNS RESULT ===')
-    console.log('Filtered interns count:', filteredInterns.length)
-    if (filteredInterns.length === 0 && interns.length > 0) {
-      console.warn('⚠️ NO INTERNS AFTER FILTERING!')
-      console.log('Check filters:', { searchQuery, batchFilter, dateFilter })
-      
-      if (batchFilter) {
-        console.log('Interns batch_ids:', interns.map(i => ({ name: i.name, batch_id: i.batch_id, type: typeof i.batch_id })))
-        console.log('Filter batch_id:', batchFilter, typeof batchFilter)
-      }
-    }
-  }, [filteredInterns, interns, searchQuery, batchFilter, dateFilter])
 
   // Already marked interns for the selected date - FIXED: Proper batch comparison
   const markedInterns = useMemo(() => {

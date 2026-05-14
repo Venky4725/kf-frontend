@@ -28,14 +28,11 @@ export default function BatchManagement() {
         api.get('/profiles', { params: { role: 'TECHNICAL_LEAD', limit: 500 } }),
       ])
       
-      console.log('📚 Batches loaded:', batchList.data)
-      console.log('👥 Tech Leads loaded:', tlProfiles.data)
-      
       setBatches(batchList.data || [])
       setTls(tlProfiles.data || [])
       setError('')
     } catch (err) {
-      console.error('Failed to load batches:', err)
+      console.error('❌ Failed to load batches:', err)
       setError(err.response?.data?.detail || 'Failed to load batches.')
       setBatches([])
       setTls([])
@@ -59,17 +56,18 @@ export default function BatchManagement() {
         team_lead_ids: form.team_lead_ids.length > 0 ? form.team_lead_ids : null,
       }
       
-      console.log('Creating batch with payload:', payload)
-      
       await api.post('/batches', payload)
       
       setForm({ ...EMPTY_FORM, start_date: new Date().toISOString().slice(0, 10) })
-      setSuccess('Batch created successfully!')
+      setSuccess('✅ Batch created successfully!')
       setTimeout(() => setSuccess(''), 3000)
-      load()
+      
+      // Immediate refetch to update UI
+      await load()
     } catch (err) {
-      console.error('Failed to create batch:', err)
-      setError(err.response?.data?.detail || 'Failed to create batch.')
+      console.error('❌ Failed to create batch:', err)
+      const errorMsg = err.response?.data?.detail || 'Failed to create batch.'
+      setError(`❌ ${errorMsg}`)
     }
   }
 
@@ -85,18 +83,19 @@ export default function BatchManagement() {
         team_lead_ids: editingForm.team_lead_ids.length > 0 ? editingForm.team_lead_ids : null,
       }
       
-      console.log('Updating batch with payload:', payload)
-      
       await api.put(`/batches/${id}`, payload)
       
       setEditingId(null)
       setEditingForm(EMPTY_FORM)
-      setSuccess('Batch updated successfully!')
+      setSuccess('✅ Batch updated successfully!')
       setTimeout(() => setSuccess(''), 3000)
-      load()
+      
+      // Immediate refetch to update UI
+      await load()
     } catch (err) {
-      console.error('Failed to update batch:', err)
-      setError(err.response?.data?.detail || 'Failed to update batch.')
+      console.error('❌ Failed to update batch:', err)
+      const errorMsg = err.response?.data?.detail || 'Failed to update batch.'
+      setError(`❌ ${errorMsg}`)
     }
   }
 
@@ -107,20 +106,44 @@ export default function BatchManagement() {
     
     try {
       await api.delete(`/batches/${id}`)
-      setSuccess('Batch deleted successfully!')
+      setSuccess('✅ Batch deleted successfully!')
       setTimeout(() => setSuccess(''), 3000)
-      load()
+      
+      // Immediate refetch to update UI
+      await load()
     } catch (err) {
-      console.error('Failed to delete batch:', err)
-      setError(err.response?.data?.detail || 'Failed to delete batch.')
+      console.error('❌ Failed to delete batch:', err)
+      const errorMsg = err.response?.data?.detail || 'Failed to delete batch.'
+      setError(`❌ ${errorMsg}`)
     }
   }
 
-  // Format tech leads for display - handles both single ID and array
+  // Format tech leads for display - USE ENRICHED BACKEND FIELDS
   function formatBatchTechLeads(batch) {
     if (!batch) return 'Unassigned'
     
-    // Handle array of tech lead IDs
+    // PRIORITY 1: Use enriched tech_leads_display field from backend (NEW)
+    if (batch.tech_leads_display && typeof batch.tech_leads_display === 'string') {
+      return batch.tech_leads_display
+    }
+    
+    // PRIORITY 2: Use technical_lead array from backend (NEW)
+    if (batch.technical_lead && Array.isArray(batch.technical_lead) && batch.technical_lead.length > 0) {
+      const names = batch.technical_lead
+        .map(tl => tl?.name)
+        .filter(Boolean)
+      return names.length > 0 ? names.join(' / ') : 'Unassigned'
+    }
+    
+    // PRIORITY 3: Use tech_leads array from backend
+    if (batch.tech_leads && Array.isArray(batch.tech_leads) && batch.tech_leads.length > 0) {
+      const names = batch.tech_leads
+        .map(tl => tl?.name)
+        .filter(Boolean)
+      return names.length > 0 ? names.join(' / ') : 'Unassigned'
+    }
+    
+    // FALLBACK: Use team_lead_ids with local lookup (legacy)
     if (batch.team_lead_ids && Array.isArray(batch.team_lead_ids) && batch.team_lead_ids.length > 0) {
       const names = batch.team_lead_ids
         .map(id => tlMap[id]?.name)
@@ -128,14 +151,9 @@ export default function BatchManagement() {
       return names.length > 0 ? names.join(' / ') : 'Unassigned'
     }
     
-    // Handle single tech lead ID (legacy)
+    // LEGACY: Single tech lead ID
     if (batch.team_lead_id) {
       return tlMap[batch.team_lead_id]?.name || 'Unassigned'
-    }
-    
-    // Handle tech_leads array directly from backend
-    if (batch.tech_leads && Array.isArray(batch.tech_leads) && batch.tech_leads.length > 0) {
-      return formatTechLeads(batch.tech_leads)
     }
     
     return 'Unassigned'

@@ -107,6 +107,7 @@ export default function InternManagement() {
     }
     
     try {
+      // Backend accepts both 'batch' and 'batch_id' - send batch_id
       const payload = {
         name: form.name.trim(),
         email: form.email.trim().toLowerCase(),
@@ -115,37 +116,59 @@ export default function InternManagement() {
         batch_id: parseInt(form.batch_id, 10),
       }
       
-      console.log('Creating intern with payload:', payload)
-      
       const response = await api.post('/profiles', payload)
-      
-      console.log('✅ Intern created successfully:', response.data)
       
       setForm(EMPTY_FORM)
       setError('')
       setSuccess('✅ Intern profile created successfully!')
       setTimeout(() => setSuccess(''), 3000)
-      load()
+      
+      // Immediate refetch to update UI
+      await load()
     } catch (err) {
       console.error('❌ Failed to create intern:', err)
-      console.error('Error response:', err.response?.data)
+      
+      // Extract human-readable error message
+      let errorMsg = 'Failed to create intern profile.'
+      
+      if (err.response?.data) {
+        const errorData = err.response.data
+        
+        // Handle different error response formats
+        if (typeof errorData === 'string') {
+          errorMsg = errorData
+        } else if (errorData.detail) {
+          // FastAPI detail field
+          if (typeof errorData.detail === 'string') {
+            errorMsg = errorData.detail
+          } else if (Array.isArray(errorData.detail)) {
+            // Validation errors array
+            errorMsg = errorData.detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ')
+          } else if (typeof errorData.detail === 'object') {
+            errorMsg = JSON.stringify(errorData.detail)
+          }
+        } else if (errorData.message) {
+          errorMsg = errorData.message
+        }
+      }
       
       // Handle specific error cases
       if (err.response?.status === 409) {
         setError('❌ An intern with this email already exists.')
       } else if (err.response?.status === 400) {
-        const detail = err.response?.data?.detail
-        setError(`❌ Validation error: ${detail || 'Invalid data provided'}`)
+        setError(`❌ Validation error: ${errorMsg}`)
       } else if (err.response?.status === 403) {
         setError('❌ Access denied: You can only create interns in your assigned batches.')
       } else {
-        const errorMsg = err.response?.data?.detail || 'Failed to create intern profile.'
         setError(`❌ ${errorMsg}`)
       }
     }
   }
 
   async function saveProfile(id) {
+    setError('')
+    setSuccess('')
+    
     try {
       const payload = {
         name: editingForm.name.trim(),
@@ -158,28 +181,63 @@ export default function InternManagement() {
       
       setEditingId(null)
       setEditingForm(EMPTY_FORM)
-      setError('')
-      load()
+      setSuccess('✅ Intern profile updated successfully!')
+      setTimeout(() => setSuccess(''), 3000)
+      
+      // Immediate refetch to update UI
+      await load()
     } catch (err) {
+      console.error('❌ Failed to update intern:', err)
+      
+      // Extract human-readable error message
+      let errorMsg = 'Failed to update intern profile.'
+      
+      if (err.response?.data) {
+        const errorData = err.response.data
+        
+        if (typeof errorData === 'string') {
+          errorMsg = errorData
+        } else if (errorData.detail) {
+          if (typeof errorData.detail === 'string') {
+            errorMsg = errorData.detail
+          } else if (Array.isArray(errorData.detail)) {
+            errorMsg = errorData.detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ')
+          } else if (typeof errorData.detail === 'object') {
+            errorMsg = JSON.stringify(errorData.detail)
+          }
+        } else if (errorData.message) {
+          errorMsg = errorData.message
+        }
+      }
+      
       if (err.response?.status === 403) {
-        setError('Access denied: You can only edit interns in your assigned batches.')
+        setError('❌ Access denied: You can only edit interns in your assigned batches.')
       } else {
-        setError(err.response?.data?.detail || 'Failed to update intern profile.')
+        setError(`❌ ${errorMsg}`)
       }
     }
   }
 
   async function deleteProfile(id) {
     if (!window.confirm('Delete this intern profile?')) return
+    
+    setError('')
+    
     try {
       await api.delete(`/profiles/${id}`)
-      setError('')
-      load()
+      setSuccess('✅ Intern profile deleted successfully!')
+      setTimeout(() => setSuccess(''), 3000)
+      
+      // Immediate refetch to update UI
+      await load()
     } catch (err) {
+      console.error('❌ Failed to delete intern:', err)
+      
       if (err.response?.status === 403) {
-        setError('Access denied: You can only delete interns in your assigned batches.')
+        setError('❌ Access denied: You can only delete interns in your assigned batches.')
       } else {
-        setError(err.response?.data?.detail || 'Failed to delete intern profile.')
+        const errorMsg = err.response?.data?.detail || 'Failed to delete intern profile.'
+        setError(`❌ ${errorMsg}`)
       }
     }
   }
@@ -198,15 +256,11 @@ export default function InternManagement() {
       const formData = new FormData()
       formData.append('file', csvFile)
       
-      console.log('📤 Uploading CSV file:', csvFile.name, 'Size:', csvFile.size, 'bytes')
-      
       const response = await api.post('/profiles/upload-csv', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
       })
-      
-      console.log('✅ CSV upload response:', response.data)
       
       const { created, skipped, errors } = response.data
       
@@ -218,7 +272,6 @@ export default function InternManagement() {
       
       // Show errors if any
       if (errors && errors.length > 0) {
-        console.warn('⚠️ CSV upload errors:', errors)
         const errorList = errors.slice(0, 5).join('\n• ')
         const remaining = errors.length > 5 ? `\n• ...and ${errors.length - 5} more errors` : ''
         setError(`⚠️ Upload completed with errors:\n• ${errorList}${remaining}`)
@@ -227,7 +280,7 @@ export default function InternManagement() {
         setTimeout(() => setSuccess(''), 5000)
       }
       
-      // Refresh data
+      // Immediate refetch to update UI
       await load()
       
       // Reset file input
@@ -236,15 +289,34 @@ export default function InternManagement() {
       
     } catch (err) {
       console.error('❌ Failed to upload CSV:', err)
-      console.error('Error response:', err.response?.data)
+      
+      // Extract human-readable error message
+      let errorMsg = 'Failed to upload CSV file. Please check the file format.'
+      
+      if (err.response?.data) {
+        const errorData = err.response.data
+        
+        if (typeof errorData === 'string') {
+          errorMsg = errorData
+        } else if (errorData.detail) {
+          if (typeof errorData.detail === 'string') {
+            errorMsg = errorData.detail
+          } else if (Array.isArray(errorData.detail)) {
+            errorMsg = errorData.detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ')
+          } else if (typeof errorData.detail === 'object') {
+            errorMsg = JSON.stringify(errorData.detail)
+          }
+        } else if (errorData.message) {
+          errorMsg = errorData.message
+        }
+      }
       
       if (err.response?.status === 403) {
         setError('❌ Access denied: You can only upload interns for your assigned batches.')
       } else if (err.response?.status === 400) {
-        const detail = err.response?.data?.detail
-        setError(`❌ Invalid CSV format: ${detail || 'Please check your CSV file format'}`)
+        setError(`❌ Invalid CSV format: ${errorMsg}`)
       } else {
-        setError(err.response?.data?.detail || '❌ Failed to upload CSV file. Please check the file format.')
+        setError(`❌ ${errorMsg}`)
       }
     } finally {
       setUploadLoading(false)

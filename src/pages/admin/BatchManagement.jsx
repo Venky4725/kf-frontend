@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 
 import api from '../../lib/api'
+import { formatTechLeads } from '../../utils/formatters'
 
-const EMPTY_FORM = { name: '', tech_stack: '', start_date: '', team_lead_id: '' }
+const EMPTY_FORM = { name: '', tech_stack: '', start_date: '', team_lead_ids: [] }
 
 export default function BatchManagement() {
   const [batches, setBatches] = useState([])
@@ -11,18 +12,35 @@ export default function BatchManagement() {
   const [editingId, setEditingId] = useState(null)
   const [editingForm, setEditingForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  // Create TL lookup map for efficient access
+  const tlMap = useMemo(() => {
+    return Object.fromEntries(tls.map(tl => [tl.id, tl]))
+  }, [tls])
 
   async function load() {
+    setLoading(true)
     try {
       const [batchList, tlProfiles] = await Promise.all([
         api.get('/batches', { params: { limit: 500 } }),
         api.get('/profiles', { params: { role: 'TECHNICAL_LEAD', limit: 500 } }),
       ])
-      setBatches(batchList.data)
-      setTls(tlProfiles.data)
+      
+      console.log('📚 Batches loaded:', batchList.data)
+      console.log('👥 Tech Leads loaded:', tlProfiles.data)
+      
+      setBatches(batchList.data || [])
+      setTls(tlProfiles.data || [])
       setError('')
     } catch (err) {
+      console.error('Failed to load batches:', err)
       setError(err.response?.data?.detail || 'Failed to load batches.')
+      setBatches([])
+      setTls([])
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -30,43 +48,108 @@ export default function BatchManagement() {
 
   async function createBatch(event) {
     event.preventDefault()
+    setError('')
+    setSuccess('')
+    
     try {
-      await api.post('/batches', {
-        ...form,
-        team_lead_id: form.team_lead_id || null,
-      })
+      const payload = {
+        name: form.name.trim(),
+        tech_stack: form.tech_stack.trim(),
+        start_date: form.start_date,
+        team_lead_ids: form.team_lead_ids.length > 0 ? form.team_lead_ids : null,
+      }
+      
+      console.log('Creating batch with payload:', payload)
+      
+      await api.post('/batches', payload)
+      
       setForm({ ...EMPTY_FORM, start_date: new Date().toISOString().slice(0, 10) })
+      setSuccess('Batch created successfully!')
+      setTimeout(() => setSuccess(''), 3000)
       load()
     } catch (err) {
+      console.error('Failed to create batch:', err)
       setError(err.response?.data?.detail || 'Failed to create batch.')
     }
   }
 
   async function saveBatch(id) {
+    setError('')
+    setSuccess('')
+    
     try {
-      await api.put(`/batches/${id}`, {
-        ...editingForm,
-        team_lead_id: editingForm.team_lead_id || null,
-      })
+      const payload = {
+        name: editingForm.name.trim(),
+        tech_stack: editingForm.tech_stack.trim(),
+        start_date: editingForm.start_date,
+        team_lead_ids: editingForm.team_lead_ids.length > 0 ? editingForm.team_lead_ids : null,
+      }
+      
+      console.log('Updating batch with payload:', payload)
+      
+      await api.put(`/batches/${id}`, payload)
+      
       setEditingId(null)
+      setEditingForm(EMPTY_FORM)
+      setSuccess('Batch updated successfully!')
+      setTimeout(() => setSuccess(''), 3000)
       load()
     } catch (err) {
+      console.error('Failed to update batch:', err)
       setError(err.response?.data?.detail || 'Failed to update batch.')
     }
   }
 
   async function deleteBatch(id) {
-    if (!window.confirm('Delete this batch?')) return
+    if (!window.confirm('Delete this batch? This will unassign all interns and tech leads.')) return
+    
+    setError('')
+    
     try {
       await api.delete(`/batches/${id}`)
+      setSuccess('Batch deleted successfully!')
+      setTimeout(() => setSuccess(''), 3000)
       load()
     } catch (err) {
+      console.error('Failed to delete batch:', err)
       setError(err.response?.data?.detail || 'Failed to delete batch.')
     }
   }
 
-  function tlName(id) {
-    return tls.find((item) => item.id === id)?.name || 'Unassigned'
+  // Format tech leads for display - handles both single ID and array
+  function formatBatchTechLeads(batch) {
+    if (!batch) return 'Unassigned'
+    
+    // Handle array of tech lead IDs
+    if (batch.team_lead_ids && Array.isArray(batch.team_lead_ids) && batch.team_lead_ids.length > 0) {
+      const names = batch.team_lead_ids
+        .map(id => tlMap[id]?.name)
+        .filter(Boolean)
+      return names.length > 0 ? names.join(' / ') : 'Unassigned'
+    }
+    
+    // Handle single tech lead ID (legacy)
+    if (batch.team_lead_id) {
+      return tlMap[batch.team_lead_id]?.name || 'Unassigned'
+    }
+    
+    // Handle tech_leads array directly from backend
+    if (batch.tech_leads && Array.isArray(batch.tech_leads) && batch.tech_leads.length > 0) {
+      return formatTechLeads(batch.tech_leads)
+    }
+    
+    return 'Unassigned'
+  }
+
+  // Handle multi-select for tech leads
+  function handleTechLeadSelect(e, isEditing = false) {
+    const selectedOptions = Array.from(e.target.selectedOptions, option => option.value)
+    
+    if (isEditing) {
+      setEditingForm({ ...editingForm, team_lead_ids: selectedOptions })
+    } else {
+      setForm({ ...form, team_lead_ids: selectedOptions })
+    }
   }
 
   return (
@@ -77,83 +160,185 @@ export default function BatchManagement() {
       </div>
 
       {error && <div className="card border border-rose-200 bg-rose-50 text-rose-700">{error}</div>}
+      {success && <div className="card border border-green-200 bg-green-50 text-green-700">{success}</div>}
 
-      <form onSubmit={createBatch} className="card grid md:grid-cols-5 gap-4">
-        <input className="input" placeholder="Batch name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input className="input" placeholder="Tech stack" value={form.tech_stack} onChange={(e) => setForm({ ...form, tech_stack: e.target.value })} required />
-        <input className="input" type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} required />
-        <select className="input" value={form.team_lead_id} onChange={(e) => setForm({ ...form, team_lead_id: e.target.value })}>
-          <option value="">No technical lead</option>
-          {tls.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-        <button className="btn-primary" type="submit">Create Batch</button>
+      <form onSubmit={createBatch} className="card space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900">Create New Batch</h2>
+        <div className="grid md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Batch Name *</label>
+            <input 
+              className="input" 
+              placeholder="e.g., KF-Cohort-5" 
+              value={form.name} 
+              onChange={(e) => setForm({ ...form, name: e.target.value })} 
+              required 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Tech Stack *</label>
+            <input 
+              className="input" 
+              placeholder="e.g., Full Stack" 
+              value={form.tech_stack} 
+              onChange={(e) => setForm({ ...form, tech_stack: e.target.value })} 
+              required 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Start Date *</label>
+            <input 
+              className="input" 
+              type="date" 
+              value={form.start_date} 
+              onChange={(e) => setForm({ ...form, start_date: e.target.value })} 
+              required 
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Assign Technical Leads (Optional)
+          </label>
+          <select 
+            className="input min-h-[100px]" 
+            multiple
+            value={form.team_lead_ids} 
+            onChange={(e) => handleTechLeadSelect(e, false)}
+          >
+            {tls.map((tl) => (
+              <option key={tl.id} value={tl.id}>{tl.name} ({tl.email})</option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-500 mt-1">
+            Hold Ctrl/Cmd to select multiple tech leads
+          </p>
+        </div>
+        <button className="btn-primary w-full" type="submit">Create Batch</button>
       </form>
 
       <div className="card overflow-x-auto">
-        <table className="table">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="th">Name</th>
-              <th className="th">Tech Stack</th>
-              <th className="th">Start Date</th>
-              <th className="th">Technical Lead</th>
-              <th className="th">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {batches.map((item) => (
-              <tr key={item.id}>
-                <td className="td">
-                  {editingId === item.id ? (
-                    <input className="input" value={editingForm.name} onChange={(e) => setEditingForm({ ...editingForm, name: e.target.value })} />
-                  ) : item.name}
-                </td>
-                <td className="td">
-                  {editingId === item.id ? (
-                    <input className="input" value={editingForm.tech_stack} onChange={(e) => setEditingForm({ ...editingForm, tech_stack: e.target.value })} />
-                  ) : item.tech_stack}
-                </td>
-                <td className="td">
-                  {editingId === item.id ? (
-                    <input className="input" type="date" value={editingForm.start_date} onChange={(e) => setEditingForm({ ...editingForm, start_date: e.target.value })} />
-                  ) : item.start_date}
-                </td>
-                <td className="td">
-                  {editingId === item.id ? (
-                    <select className="input" value={editingForm.team_lead_id || ''} onChange={(e) => setEditingForm({ ...editingForm, team_lead_id: e.target.value })}>
-                      <option value="">No technical lead</option>
-                      {tls.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-                    </select>
-                  ) : tlName(item.team_lead_id)}
-                </td>
-                <td className="td space-x-3">
-                  {editingId === item.id ? (
-                    <>
-                      <button className="text-sm text-brand-700 font-semibold" onClick={() => saveBatch(item.id)}>Save</button>
-                      <button className="text-sm text-slate-500" onClick={() => setEditingId(null)}>Cancel</button>
-                    </>
-                  ) : (
-                    <>
-                      <button className="text-sm text-brand-700 font-semibold" onClick={() => {
-                        setEditingId(item.id)
-                        setEditingForm({
-                          name: item.name,
-                          tech_stack: item.tech_stack,
-                          start_date: item.start_date,
-                          team_lead_id: item.team_lead_id || '',
-                        })
-                      }}>Edit</button>
-                      <button className="text-sm text-rose-700 font-semibold" onClick={() => deleteBatch(item.id)}>Delete</button>
-                    </>
-                  )}
-                </td>
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">All Batches</h2>
+        
+        {loading ? (
+          <div className="text-center py-8 text-slate-500">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"></div>
+            <p className="mt-2">Loading batches...</p>
+          </div>
+        ) : (
+          <table className="table">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="th">Name</th>
+                <th className="th">Tech Stack</th>
+                <th className="th">Start Date</th>
+                <th className="th">Technical Leads</th>
+                <th className="th">Actions</th>
               </tr>
-            ))}
-            {batches.length === 0 && (
-              <tr><td className="td text-slate-500" colSpan={5}>No batches found.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {batches.map((item) => (
+                <tr key={item.id}>
+                  <td className="td">
+                    {editingId === item.id ? (
+                      <input 
+                        className="input" 
+                        value={editingForm.name} 
+                        onChange={(e) => setEditingForm({ ...editingForm, name: e.target.value })} 
+                      />
+                    ) : item.name}
+                  </td>
+                  <td className="td">
+                    {editingId === item.id ? (
+                      <input 
+                        className="input" 
+                        value={editingForm.tech_stack} 
+                        onChange={(e) => setEditingForm({ ...editingForm, tech_stack: e.target.value })} 
+                      />
+                    ) : item.tech_stack}
+                  </td>
+                  <td className="td">
+                    {editingId === item.id ? (
+                      <input 
+                        className="input" 
+                        type="date" 
+                        value={editingForm.start_date} 
+                        onChange={(e) => setEditingForm({ ...editingForm, start_date: e.target.value })} 
+                      />
+                    ) : item.start_date}
+                  </td>
+                  <td className="td">
+                    {editingId === item.id ? (
+                      <select 
+                        className="input min-h-[80px]" 
+                        multiple
+                        value={editingForm.team_lead_ids || []} 
+                        onChange={(e) => handleTechLeadSelect(e, true)}
+                      >
+                        {tls.map((tl) => (
+                          <option key={tl.id} value={tl.id}>{tl.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="font-medium">{formatBatchTechLeads(item)}</span>
+                    )}
+                  </td>
+                  <td className="td space-x-3">
+                    {editingId === item.id ? (
+                      <>
+                        <button 
+                          className="text-sm text-brand-700 font-semibold" 
+                          onClick={() => saveBatch(item.id)}
+                        >
+                          Save
+                        </button>
+                        <button 
+                          className="text-sm text-slate-500" 
+                          onClick={() => {
+                            setEditingId(null)
+                            setEditingForm(EMPTY_FORM)
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button 
+                          className="text-sm text-brand-700 font-semibold" 
+                          onClick={() => {
+                            setEditingId(item.id)
+                            setEditingForm({
+                              name: item.name,
+                              tech_stack: item.tech_stack,
+                              start_date: item.start_date,
+                              team_lead_ids: item.team_lead_ids || (item.team_lead_id ? [item.team_lead_id] : []),
+                            })
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button 
+                          className="text-sm text-rose-700 font-semibold" 
+                          onClick={() => deleteBatch(item.id)}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {batches.length === 0 && (
+                <tr>
+                  <td className="td text-slate-500 text-center" colSpan={5}>
+                    No batches found. Create your first batch above.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )

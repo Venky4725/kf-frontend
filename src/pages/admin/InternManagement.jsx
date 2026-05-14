@@ -82,20 +82,27 @@ export default function InternManagement() {
     setError('')
     setSuccess('')
     
-    // Validate batch selection
-    if (!form.batch_id) {
-      setError('Please select a batch.')
-      return
-    }
-    
-    // Validate required fields
+    // Validate required fields with detailed messages
     if (!form.name.trim()) {
-      setError('Name is required.')
+      setError('❌ Name is required.')
       return
     }
     
     if (!form.email.trim()) {
-      setError('Email is required.')
+      setError('❌ Email is required.')
+      return
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(form.email.trim())) {
+      setError('❌ Please enter a valid email address.')
+      return
+    }
+    
+    // Validate batch selection
+    if (!form.batch_id) {
+      setError('❌ Please select a batch.')
       return
     }
     
@@ -108,16 +115,33 @@ export default function InternManagement() {
         batch_id: parseInt(form.batch_id, 10),
       }
       
-      await api.post('/profiles', payload)
+      console.log('Creating intern with payload:', payload)
+      
+      const response = await api.post('/profiles', payload)
+      
+      console.log('✅ Intern created successfully:', response.data)
       
       setForm(EMPTY_FORM)
       setError('')
-      setSuccess('Intern profile created successfully!')
+      setSuccess('✅ Intern profile created successfully!')
       setTimeout(() => setSuccess(''), 3000)
       load()
     } catch (err) {
-      const errorMsg = err.response?.data?.detail || 'Failed to create intern profile.'
-      setError(errorMsg)
+      console.error('❌ Failed to create intern:', err)
+      console.error('Error response:', err.response?.data)
+      
+      // Handle specific error cases
+      if (err.response?.status === 409) {
+        setError('❌ An intern with this email already exists.')
+      } else if (err.response?.status === 400) {
+        const detail = err.response?.data?.detail
+        setError(`❌ Validation error: ${detail || 'Invalid data provided'}`)
+      } else if (err.response?.status === 403) {
+        setError('❌ Access denied: You can only create interns in your assigned batches.')
+      } else {
+        const errorMsg = err.response?.data?.detail || 'Failed to create intern profile.'
+        setError(`❌ ${errorMsg}`)
+      }
     }
   }
 
@@ -162,18 +186,19 @@ export default function InternManagement() {
 
   async function handleCsvUpload() {
     if (!csvFile) {
-      setError('Please select a CSV file to upload.')
+      setError('❌ Please select a CSV file to upload.')
       return
     }
     
     setUploadLoading(true)
     setError('')
+    setSuccess('')
     
     try {
       const formData = new FormData()
       formData.append('file', csvFile)
       
-      console.log('Uploading CSV file:', csvFile.name)
+      console.log('📤 Uploading CSV file:', csvFile.name, 'Size:', csvFile.size, 'bytes')
       
       const response = await api.post('/profiles/upload-csv', formData, {
         headers: {
@@ -181,19 +206,22 @@ export default function InternManagement() {
         }
       })
       
+      console.log('✅ CSV upload response:', response.data)
+      
       const { created, skipped, errors } = response.data
       
       setCsvFile(null)
       
-      // Build success message
-      let message = `CSV Upload Complete: ${created} created`
-      if (skipped > 0) message += `, ${skipped} skipped`
+      // Build detailed success message
+      let message = `✅ CSV Upload Complete:\n• ${created} intern(s) created`
+      if (skipped > 0) message += `\n• ${skipped} skipped (already exist)`
       
       // Show errors if any
       if (errors && errors.length > 0) {
-        console.warn('CSV upload errors:', errors)
-        message += `\n\nErrors:\n${errors.join('\n')}`
-        setError(message)
+        console.warn('⚠️ CSV upload errors:', errors)
+        const errorList = errors.slice(0, 5).join('\n• ')
+        const remaining = errors.length > 5 ? `\n• ...and ${errors.length - 5} more errors` : ''
+        setError(`⚠️ Upload completed with errors:\n• ${errorList}${remaining}`)
       } else {
         setSuccess(message)
         setTimeout(() => setSuccess(''), 5000)
@@ -202,13 +230,21 @@ export default function InternManagement() {
       // Refresh data
       await load()
       
-      console.log('CSV upload successful:', response.data)
+      // Reset file input
+      const fileInput = document.querySelector('input[type="file"]')
+      if (fileInput) fileInput.value = ''
+      
     } catch (err) {
-      console.error('Failed to upload CSV:', err)
+      console.error('❌ Failed to upload CSV:', err)
+      console.error('Error response:', err.response?.data)
+      
       if (err.response?.status === 403) {
-        setError('Access denied: You can only upload interns for your assigned batches.')
+        setError('❌ Access denied: You can only upload interns for your assigned batches.')
+      } else if (err.response?.status === 400) {
+        const detail = err.response?.data?.detail
+        setError(`❌ Invalid CSV format: ${detail || 'Please check your CSV file format'}`)
       } else {
-        setError(err.response?.data?.detail || 'Failed to upload CSV file.')
+        setError(err.response?.data?.detail || '❌ Failed to upload CSV file. Please check the file format.')
       }
     } finally {
       setUploadLoading(false)

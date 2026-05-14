@@ -93,7 +93,12 @@ export default function BatchManagement() {
         name: editingForm.name.trim(),
         tech_stack: editingForm.tech_stack.trim(),
         start_date: editingForm.start_date,
-        team_lead_ids: editingForm.team_lead_ids.length > 0 ? editingForm.team_lead_ids : null,
+        team_lead_ids: editingForm.team_lead_ids && Array.isArray(editingForm.team_lead_ids) && editingForm.team_lead_ids.length > 0 ? editingForm.team_lead_ids : null,
+      }
+      
+      // DEBUG: Log the payload being sent
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Sending batch update payload:', payload)
       }
       
       await api.put(`/batches/${id}`, payload)
@@ -355,7 +360,14 @@ export default function BatchManagement() {
                               name: item.name,
                               tech_stack: item.tech_stack,
                               start_date: item.start_date,
-                              team_lead_ids: item.team_lead_ids || (item.team_lead_id ? [item.team_lead_id] : []),
+                              team_lead_ids: item.team_lead_ids || 
+                                (item.team_lead_id ? [item.team_lead_id] : []) ||
+                                (item.technical_lead && Array.isArray(item.technical_lead) 
+                                  ? item.technical_lead.map(tl => tl.id) 
+                                  : []) ||
+                                (item.technical_leads && Array.isArray(item.technical_leads) 
+                                  ? item.technical_leads.map(tl => tl.id) 
+                                  : []),
                             })
                           }}
                         >

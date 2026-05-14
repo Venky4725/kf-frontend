@@ -110,8 +110,8 @@ export default function EvaluationsPage() {
         
         // Filter evaluations to only show those for interns in assigned batches
         const allowedInternIds = new Set(filteredInterns.map(i => i.id))
-        const filteredEvaluations = (evaluationList.data || []).filter(eval => 
-          allowedInternIds.has(eval.intern_id)
+        const filteredEvaluations = (evaluationList.data || []).filter(evaluation => 
+          allowedInternIds.has(evaluation.intern_id)
         )
         setEvaluations(filteredEvaluations)
       } else {

@@ -96,25 +96,31 @@ export default function EvaluationsPage() {
     try {
       const [profiles, batches, evaluationList] = await Promise.all([
         api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
-        // Backend now filters batches for Tech Lead automatically
         user?.role === 'TECHNICAL_LEAD'
           ? api.get('/batches', { params: { limit: 500 } })
           : Promise.resolve({ data: [] }),
-        api.get('/evaluations', {
-          params: user?.role === 'TECHNICAL_LEAD' ? { reviewed_by: user.id, limit: 500 } : { limit: 500 },
-        }),
+        // DO NOT filter by reviewed_by - show all evaluations from assigned batches
+        api.get('/evaluations', { params: { limit: 500 } }),
       ])
 
       if (user?.role === 'TECHNICAL_LEAD') {
         const allowedBatchIds = new Set((batches.data || []).map((batch) => batch.id))
-        setInterns((profiles.data || []).filter((intern) => allowedBatchIds.has(intern.batch_id)))
+        const filteredInterns = (profiles.data || []).filter((intern) => allowedBatchIds.has(intern.batch_id))
+        setInterns(filteredInterns)
+        
+        // Filter evaluations to only show those for interns in assigned batches
+        const allowedInternIds = new Set(filteredInterns.map(i => i.id))
+        const filteredEvaluations = (evaluationList.data || []).filter(eval => 
+          allowedInternIds.has(eval.intern_id)
+        )
+        setEvaluations(filteredEvaluations)
       } else {
         setInterns(profiles.data || [])
+        setEvaluations(evaluationList.data || [])
       }
-      setEvaluations(evaluationList.data || [])
       setError('')
     } catch (err) {
-      console.error('Failed to load evaluations:', err)
+      console.error('❌ Failed to load evaluations:', err)
       setError(err.response?.data?.detail || 'Failed to load evaluations.')
       setInterns([])
       setEvaluations([])
@@ -246,12 +252,7 @@ This action cannot be undone.`)) {
         params.append('week_numbers', selectedWeeks.join(','))
       }
       
-      // If Tech Lead, backend will filter by their batches automatically
-      if (user?.role === 'TECHNICAL_LEAD') {
-        params.append('reviewed_by', user.id)
-      }
-      
-      console.log('Downloading CSV with params:', params.toString())
+      // DO NOT filter by reviewed_by - TL should export all evaluations from assigned batches
       
       const response = await api.get(`/evaluations/export?${params.toString()}`, {
         responseType: 'blob'
@@ -272,10 +273,8 @@ This action cannot be undone.`)) {
       // Cleanup
       document.body.removeChild(link)
       window.URL.revokeObjectURL(url)
-      
-      console.log('CSV download successful')
     } catch (err) {
-      console.error('Failed to download CSV:', err)
+      console.error('❌ Failed to download CSV:', err)
       if (err.response?.status === 404) {
         setError('No evaluations found matching your filters.')
       } else {

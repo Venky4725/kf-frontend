@@ -71,13 +71,25 @@ export default function SubmissionsView() {
         
         const { data } = await api.get('/submissions', { params })
         
-        // Filter to allowed interns only
+        // Filter to allowed interns only (batch-scoped)
         const allowedIds = new Set(interns.map((intern) => intern.id))
-        const filtered = data.filter((item) => allowedIds.size === 0 || allowedIds.has(item.user_id))
+        let filtered = data.filter((item) => allowedIds.size === 0 || allowedIds.has(item.user_id))
+        
+        // CRITICAL: Apply batch filter if selected
+        if (filters.batch_id) {
+          filtered = filtered.filter(item => {
+            const intern = internMap[item.user_id]
+            if (!intern) return false
+            
+            // Normalize ID comparison
+            return String(intern.batch_id) === String(filters.batch_id)
+          })
+        }
+        
         setSubmissions(filtered || [])
         setError('')
       } catch (err) {
-        console.error('Failed to load submissions:', err)
+        console.error('❌ Failed to load submissions:', err)
         setError(err.response?.data?.detail || 'Failed to load submissions.')
         setSubmissions([])
       } finally {
@@ -85,7 +97,7 @@ export default function SubmissionsView() {
       }
     }
     loadSubmissions()
-  }, [filters.user_id, filters.submitted_for, searchQuery, sortBy, sortOrder, interns])
+  }, [filters.user_id, filters.submitted_for, filters.batch_id, searchQuery, sortBy, sortOrder, interns, internMap])
 
   async function deleteSubmission(id) {
     if (!window.confirm('Delete this submission?')) return

@@ -48,18 +48,11 @@ export default function InternManagement() {
         api.get('/profiles', { params }),
       ])
       
-      console.log('📚 Batches fetched:', batchList.data)
-      console.log('👥 Profiles fetched:', profiles.data)
-      console.log('🔑 Current user:', user)
-      
       setBatches(batchList.data || [])
       
       // Filter to only show interns in Tech Lead's batches
       const allowedBatchIds = new Set(batchList.data.map((batch) => batch.id))
       const filteredInterns = profiles.data.filter((intern) => allowedBatchIds.has(intern.batch_id))
-      
-      console.log('✅ Allowed batch IDs:', Array.from(allowedBatchIds))
-      console.log('✅ Filtered interns:', filteredInterns)
       
       setInterns(filteredInterns)
       setError('')
@@ -86,8 +79,6 @@ export default function InternManagement() {
         batch_name: editingForm.batch_name || null,
       }
       
-      console.log('Saving profile:', id, payload)
-      
       await api.put(`/profiles/${id}`, payload)
       
       // Update local state immediately for better UX
@@ -105,8 +96,6 @@ export default function InternManagement() {
       
       // Refresh data from backend to ensure consistency
       await load()
-      
-      console.log('Profile saved successfully')
     } catch (err) {
       console.error('Failed to save profile:', err)
       if (err.response?.status === 403) {
@@ -121,8 +110,6 @@ export default function InternManagement() {
     if (!window.confirm(`Delete intern profile for ${internName}?\n\nThis action cannot be undone.`)) return
     
     try {
-      console.log('Deleting profile:', id)
-      
       await api.delete(`/profiles/${id}`)
       
       // Update local state immediately
@@ -134,8 +121,6 @@ export default function InternManagement() {
       
       // Refresh data from backend
       await load()
-      
-      console.log('Profile deleted successfully')
     } catch (err) {
       console.error('Failed to delete profile:', err)
       if (err.response?.status === 403) {
@@ -164,8 +149,6 @@ export default function InternManagement() {
         batch_name: createForm.batch_name.trim(),
       }
       
-      console.log('Creating intern:', payload)
-      
       await api.post('/profiles', payload)
       
       setCreateForm(EMPTY_FORM)
@@ -175,8 +158,6 @@ export default function InternManagement() {
       
       // Refresh data
       await load()
-      
-      console.log('Intern created successfully')
     } catch (err) {
       console.error('Failed to create intern:', err)
       if (err.response?.status === 403) {
@@ -199,8 +180,6 @@ export default function InternManagement() {
     try {
       const formData = new FormData()
       formData.append('file', csvFile)
-      
-      console.log('Uploading CSV file:', csvFile.name)
       
       const response = await api.post('/profiles/upload-csv', formData, {
         headers: {
@@ -228,8 +207,6 @@ export default function InternManagement() {
       
       // Refresh data
       await load()
-      
-      console.log('CSV upload successful:', response.data)
     } catch (err) {
       console.error('Failed to upload CSV:', err)
       if (err.response?.status === 403) {
@@ -256,44 +233,25 @@ export default function InternManagement() {
 
   // Role-based access control
   function canEditIntern(intern) {
-    if (!user) {
-      console.log('No user found')
-      return false
-    }
+    if (!user) return false
     
     // ADMIN can edit all interns
-    if (user?.role === 'ADMIN') {
-      console.log('User is ADMIN - can edit all')
-      return true
-    }
+    if (user?.role === 'ADMIN') return true
     
     // TECHNICAL_LEAD can edit only interns in their assigned batches
     if (user?.role === 'TECHNICAL_LEAD') {
       // Check if intern's batch is in the Tech Lead's assigned batches
       const allowedBatchIds = new Set(batches.map((batch) => batch.id))
-      const hasAccess = allowedBatchIds.has(intern.batch_id)
-      
-      console.log('Tech Lead Access Check:', {
-        internName: intern.name,
-        internBatchId: intern.batch_id,
-        allowedBatchIds: Array.from(allowedBatchIds),
-        hasAccess
-      })
-      
-      return hasAccess
+      return allowedBatchIds.has(intern.batch_id)
     }
     
-    console.log('No role match - no access')
     return false
   }
 
   const batchMap = useMemo(() => Object.fromEntries(batches.map((batch) => [batch.id, batch])), [batches])
 
   function batchName(batchId) {
-    if (!batchId) {
-      console.log('⚠️ Intern has no batch_id assigned')
-      return 'Unassigned'
-    }
+    if (!batchId) return 'Unassigned'
     
     const batchName = batchMap[batchId]?.name
     

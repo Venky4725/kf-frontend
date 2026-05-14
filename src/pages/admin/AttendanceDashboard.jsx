@@ -48,10 +48,17 @@ export default function AttendanceDashboard() {
     }
   })
   const [batchFilter, setBatchFilter] = React.useState('')
+  const [internFilter, setInternFilter] = React.useState('')
   const [statusFilter, setStatusFilter] = React.useState('')
   const [internSearch, setInternSearch] = React.useState('')
   
   const isAdmin = user?.role === 'ADMIN'
+  
+  // Filter interns by selected batch for dropdown
+  const filteredInternsForDropdown = React.useMemo(() => {
+    if (!batchFilter) return interns
+    return interns.filter(intern => String(intern.batch_id) === String(batchFilter))
+  }, [interns, batchFilter])
 
   // Load data with proper error handling and debugging
   const loadData = React.useCallback(async () => {
@@ -70,38 +77,16 @@ export default function AttendanceDashboard() {
       if (batchFilter) params.batch_id = batchFilter
       if (statusFilter) params.status = statusFilter
       
-      console.log('📊 Loading dashboard data with params:', params)
-      
       const [attendanceRes, internsRes, batchesRes] = await Promise.all([
         api.get('/attendance', { params }),
         api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
         api.get('/batches', { params: { limit: 500 } }),
       ])
       
-      console.log('✅ Attendance Response:', attendanceRes.data)
-      console.log('✅ Interns Response:', internsRes.data)
-      console.log('✅ Batches Response:', batchesRes.data)
-      
       // Validate and set data with fallbacks
       const validatedAttendance = Array.isArray(attendanceRes.data) ? attendanceRes.data : []
       const validatedInterns = Array.isArray(internsRes.data) ? internsRes.data : []
       const validatedBatches = Array.isArray(batchesRes.data) ? batchesRes.data : []
-      
-      console.log('📊 Validated data counts:', {
-        attendance: validatedAttendance.length,
-        interns: validatedInterns.length,
-        batches: validatedBatches.length
-      })
-      
-      // Log sample intern to see data structure
-      if (validatedInterns.length > 0) {
-        console.log('📋 Sample intern:', validatedInterns[0])
-      }
-      
-      // Log sample batch to see data structure
-      if (validatedBatches.length > 0) {
-        console.log('📋 Sample batch:', validatedBatches[0])
-      }
       
       setAttendanceData(validatedAttendance)
       setInterns(validatedInterns)
@@ -133,17 +118,11 @@ export default function AttendanceDashboard() {
   // PERMANENT CENTRALIZED FILTERING ARCHITECTURE
   // This is the SINGLE SOURCE OF TRUTH for all filtered data
   const filteredAttendanceData = React.useMemo(() => {
-    console.log('=== CENTRALIZED FILTERING PIPELINE ===')
-    
     if (!Array.isArray(attendanceData)) {
-      console.error('❌ attendanceData is not an array:', attendanceData)
       return []
     }
     
     let filtered = [...attendanceData]
-    const debugCounts = { initial: filtered.length }
-    
-    console.log('Step 0 - Initial data:', debugCounts.initial, 'records')
     
     // STEP 1: Date Range Filter
     if (dateRange.start || dateRange.end) {
@@ -161,93 +140,40 @@ export default function AttendanceDashboard() {
         
         return true
       })
-      debugCounts.afterDate = filtered.length
-      console.log('Step 1 - After date filter:', debugCounts.afterDate, 'records')
-    } else {
-      debugCounts.afterDate = filtered.length
-      console.log('Step 1 - No date filter applied')
     }
     
     // STEP 2: Batch Filter (via intern batch_id)
     if (batchFilter) {
-      console.log('=== BATCH FILTER STEP DETAILED ===')
-      console.log('Filter value:', batchFilter, 'Type:', typeof batchFilter)
-      
-      // Log sample records before filtering
-      if (filtered.length > 0) {
-        const sampleRecord = filtered[0]
-        const sampleIntern = internMap[sampleRecord.user_id]
-        console.log('Sample record before batch filter:', {
-          user_id: sampleRecord.user_id,
-          intern: sampleIntern,
-          intern_batch_id: sampleIntern?.batch_id,
-          intern_batch_id_type: typeof sampleIntern?.batch_id
-        })
-      }
-      
       filtered = filtered.filter(record => {
         if (!record || !record.user_id) return false
         
         const intern = internMap[record.user_id]
-        if (!intern) {
-          console.log('⚠️ No intern found for user_id:', record.user_id)
-          return false
-        }
+        if (!intern) return false
         
-        // PERMANENT RULE: Compare batch IDs only, handle type coercion
-        const internBatchId = intern.batch_id
-        const filterBatchId = batchFilter
-        
-        // Try multiple comparison strategies for robustness
-        const exactMatch = internBatchId === filterBatchId
-        const stringMatch = String(internBatchId) === String(filterBatchId)
-        const numberMatch = Number(internBatchId) === Number(filterBatchId)
-        
-        const matches = exactMatch || stringMatch || numberMatch
-        
-        // Debug first few comparisons
-        if (filtered.indexOf(record) < 3) {
-          console.log('Batch comparison:', {
-            internBatchId,
-            filterBatchId,
-            exactMatch,
-            stringMatch,
-            numberMatch,
-            finalMatch: matches
-          })
-        }
-        
-        return matches
+        // Normalize ID comparison
+        return String(intern.batch_id) === String(batchFilter)
       })
-      debugCounts.afterBatch = filtered.length
-      console.log('Step 2 - After batch filter:', debugCounts.afterBatch, 'records', 
-                  '(filtering for batch:', batchFilter, ')')
-      
-      if (debugCounts.afterBatch === 0 && debugCounts.afterDate > 0) {
-        console.error('❌ BATCH FILTER ELIMINATED ALL RECORDS!')
-        console.log('Available batch_ids in internMap:', 
-          Object.values(internMap).slice(0, 5).map(i => ({ id: i.id, batch_id: i.batch_id })))
-      }
-    } else {
-      debugCounts.afterBatch = filtered.length
-      console.log('Step 2 - No batch filter applied')
     }
     
-    // STEP 3: Status Filter
+    // STEP 3: Intern Filter (specific intern selected)
+    if (internFilter) {
+      filtered = filtered.filter(record => {
+        if (!record || !record.user_id) return false
+        
+        // Normalize ID comparison
+        return String(record.user_id) === String(internFilter)
+      })
+    }
+    
+    // STEP 4: Status Filter
     if (statusFilter) {
       filtered = filtered.filter(record => {
         if (!record || !record.status) return false
         return record.status.toLowerCase() === statusFilter.toLowerCase()
       })
-      debugCounts.afterStatus = filtered.length
-      console.log('Step 3 - After status filter:', debugCounts.afterStatus, 'records',
-                  '(filtering for status:', statusFilter, ')')
-    } else {
-      debugCounts.afterStatus = filtered.length
-      console.log('Step 3 - No status filter applied')
     }
     
-    // STEP 4: Intern Search Filter (name, email, or batch name)
+    // STEP 5: Intern Search Filter (name, email, or batch name)
     if (internSearch && internSearch.trim()) {
       const searchTerm = internSearch.trim().toLowerCase()
       
@@ -266,25 +192,10 @@ export default function AttendanceDashboard() {
                internEmail.includes(searchTerm) ||
                batchName.includes(searchTerm)
       })
-      debugCounts.afterSearch = filtered.length
-      console.log('Step 4 - After search filter:', debugCounts.afterSearch, 'records',
-                  '(searching for:', searchTerm, ')')
-    } else {
-      debugCounts.afterSearch = filtered.length
-      console.log('Step 4 - No search filter applied')
-    }
-    
-    // Final summary
-    console.log('=== FILTERING COMPLETE ===')
-    console.log('Pipeline:', debugCounts)
-    console.log('Final filtered records:', filtered.length)
-    
-    if (filtered.length === 0 && attendanceData.length > 0) {
-      console.warn('⚠️ All records filtered out! Check filter values.')
     }
     
     return filtered
-  }, [attendanceData, dateRange, batchFilter, statusFilter, internSearch, internMap, batchMap])
+  }, [attendanceData, dateRange, batchFilter, internFilter, statusFilter, internSearch, internMap, batchMap])
 
   // Active filter summary for UX clarity
   const activeFilterSummary = React.useMemo(() => {
@@ -301,6 +212,11 @@ export default function AttendanceDashboard() {
       filters.push(`Batch: ${batch?.name || batchFilter}`)
     }
     
+    if (internFilter) {
+      const intern = interns.find(i => String(i.id) === String(internFilter))
+      filters.push(`Intern: ${intern?.name || internFilter}`)
+    }
+    
     if (statusFilter) {
       filters.push(`Status: ${statusFilter.toUpperCase()}`)
     }
@@ -315,7 +231,7 @@ export default function AttendanceDashboard() {
       count: filteredAttendanceData.length,
       total: attendanceData.length
     }
-  }, [dateRange, batchFilter, statusFilter, internSearch, batches, filteredAttendanceData, attendanceData])
+  }, [dateRange, batchFilter, internFilter, statusFilter, internSearch, batches, interns, filteredAttendanceData, attendanceData])
 
   // Calculate summary metrics from FILTERED data
   const summaryMetrics = React.useMemo(() => {
@@ -458,71 +374,7 @@ export default function AttendanceDashboard() {
     }
   }, [filteredAttendanceData])
 
-  // DEBUG: Log all data when it changes
-  React.useEffect(() => {
-    console.log('=== DATA LOADED ===')
-    console.log('Interns:', interns.length, interns)
-    console.log('Batches:', batches.length, batches)
-    console.log('Attendance:', attendanceData.length)
-    
-    if (interns.length > 0) {
-      console.log('First intern structure:', interns[0])
-      console.log('Intern batch_id type:', typeof interns[0]?.batch_id, interns[0]?.batch_id)
-    }
-    
-    if (batches.length > 0) {
-      console.log('First batch structure:', batches[0])
-      console.log('Batch id type:', typeof batches[0]?.id, batches[0]?.id)
-    }
-  }, [interns, batches, attendanceData])
 
-  // DEBUG: Log filter states with detailed batch analysis
-  React.useEffect(() => {
-    console.log('=== FILTER STATE DEBUG ===')
-    console.log('batchFilter:', batchFilter, typeof batchFilter)
-    console.log('internSearch:', internSearch)
-    
-    // Debug batch filtering issue
-    if (batchFilter) {
-      console.log('=== BATCH FILTER ANALYSIS ===')
-      const selectedBatch = batches.find(b => String(b.id) === String(batchFilter))
-      console.log('Selected batch object:', selectedBatch)
-      
-      // Count interns in this batch
-      const internsInBatch = interns.filter(intern => {
-        const internBatchId = intern.batch_id
-        const matches = 
-          internBatchId === batchFilter ||
-          String(internBatchId) === String(batchFilter) ||
-          Number(internBatchId) === Number(batchFilter)
-        return matches
-      })
-      
-      console.log('Total interns:', interns.length)
-      console.log('Interns in selected batch:', internsInBatch.length)
-      console.log('Sample intern batch_ids:', interns.slice(0, 3).map(i => ({ id: i.id, name: i.name, batch_id: i.batch_id })))
-      
-      if (internsInBatch.length === 0) {
-        console.warn('⚠️ NO INTERNS FOUND IN BATCH!')
-        console.log('Looking for batch_id:', batchFilter, typeof batchFilter)
-        console.log('Available batch_ids in interns:', [...new Set(interns.map(i => i.batch_id))])
-      }
-      
-      // Count attendance records for this batch
-      const attendanceInBatch = attendanceData.filter(record => {
-        const intern = internMap[record.user_id]
-        if (!intern) return false
-        
-        const matches = 
-          intern.batch_id === batchFilter ||
-          String(intern.batch_id) === String(batchFilter) ||
-          Number(intern.batch_id) === Number(batchFilter)
-        return matches
-      })
-      
-      console.log('Attendance records in batch:', attendanceInBatch.length)
-    }
-  }, [batchFilter, internSearch, batches, interns, attendanceData, internMap])
 
 
 
@@ -532,8 +384,6 @@ export default function AttendanceDashboard() {
 
   // Export FILTERED data to CSV
   const exportToCSV = () => {
-    console.log('=== CSV EXPORT ===')
-    
     if (!filteredAttendanceData || filteredAttendanceData.length === 0) {
       alert('No attendance data to export. Try adjusting your filters.')
       return
@@ -550,8 +400,6 @@ export default function AttendanceDashboard() {
       // Headers
       const headers = ['Date', 'Intern Name', 'Email', 'Batch', 'Status']
       const headerRow = headers.map(h => escapeCSV(h)).join(',')
-      
-      console.log('Exporting', filteredAttendanceData.length, 'filtered records')
       
       // Data rows from FILTERED data
       const dataRows = filteredAttendanceData
@@ -595,9 +443,6 @@ export default function AttendanceDashboard() {
       const csvLines = [headerRow, ...dataRows]
       const csvContent = csvLines.join('\n')
       
-      console.log('CSV Preview:', csvContent.substring(0, 200))
-      console.log('Total rows:', dataRows.length)
-      
       // Create blob with UTF-8 BOM
       const BOM = '\uFEFF'
       const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -614,8 +459,6 @@ export default function AttendanceDashboard() {
       
       link.click()
       window.URL.revokeObjectURL(url)
-      
-      console.log('✅ CSV exported successfully')
     } catch (err) {
       console.error('❌ CSV export error:', err)
       alert('Failed to export CSV: ' + err.message)
@@ -643,11 +486,12 @@ export default function AttendanceDashboard() {
       })
     }
     setBatchFilter('')
+    setInternFilter('')
     setStatusFilter('')
     setInternSearch('')
   }
 
-  const hasActiveFilters = batchFilter || statusFilter || internSearch
+  const hasActiveFilters = batchFilter || internFilter || statusFilter || internSearch
 
   // Loading skeleton
   if (loading && attendanceData.length === 0) {
@@ -742,7 +586,7 @@ export default function AttendanceDashboard() {
           </div>
         </div>
         
-        <div className="grid md:grid-cols-5 gap-4">
+        <div className="grid md:grid-cols-6 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Start Date</label>
             <input
@@ -764,7 +608,14 @@ export default function AttendanceDashboard() {
           {isAdmin && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Batch</label>
-              <select className="input" value={batchFilter} onChange={(e) => setBatchFilter(e.target.value)}>
+              <select 
+                className="input" 
+                value={batchFilter} 
+                onChange={(e) => {
+                  setBatchFilter(e.target.value)
+                  setInternFilter('')
+                }}
+              >
                 <option value="">All Batches</option>
                 {(batches || []).map(batch => (
                   <option key={batch.id} value={batch.id}>{batch.name}</option>
@@ -772,6 +623,20 @@ export default function AttendanceDashboard() {
               </select>
             </div>
           )}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Intern</label>
+            <select 
+              className="input" 
+              value={internFilter} 
+              onChange={(e) => setInternFilter(e.target.value)}
+              disabled={isAdmin && !batchFilter}
+            >
+              <option value="">All Interns</option>
+              {filteredInternsForDropdown.map(intern => (
+                <option key={intern.id} value={intern.id}>{intern.name}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
             <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>

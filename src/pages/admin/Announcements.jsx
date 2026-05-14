@@ -120,12 +120,6 @@ export default function Announcements() {
 
   // Open edit modal
   function openEditModal(notification) {
-    console.log('=== OPENING EDIT MODAL ===')
-    console.log('Notification:', notification)
-    console.log('User ID:', notification.user_id, 'Type:', typeof notification.user_id)
-    console.log('Is Broadcast:', notification.is_broadcast)
-    console.log('Current User:', user?.id, user?.role)
-    
     setEditingNotification(notification)
     setEditForm({
       title: notification.title || '',
@@ -184,19 +178,7 @@ export default function Announcements() {
       
       // DO NOT send is_read when editing - that's only for mark as read functionality
       
-      console.log('=== NOTIFICATION UPDATE DEBUG ===')
-      console.log('Notification ID:', editingNotification.id)
-      console.log('User Role:', user?.role)
-      console.log('Is Broadcast:', editingNotification.is_broadcast)
-      console.log('Original user_id:', editingNotification.user_id)
-      console.log('Edit form user_id:', editForm.user_id)
-      console.log('Final payload:', updateData)
-      console.log('Current user:', { id: user?.id, role: user?.role })
-      console.log('API endpoint:', `/notifications/${editingNotification.id}`)
-      
       const response = await api.put(`/notifications/${editingNotification.id}`, updateData)
-      
-      console.log('✅ Update successful:', response.data)
       
       setSuccess('Notification updated successfully!')
       setTimeout(() => setSuccess(''), 3000)

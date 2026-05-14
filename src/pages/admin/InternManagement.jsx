@@ -27,9 +27,6 @@ export default function InternManagement() {
   const [batchFilter, setBatchFilter] = useState('')
   const [sortOption, setSortOption] = useState('name_asc')
 
-  // Debounce timer
-  const [debounceTimer, setDebounceTimer] = useState(null)
-
   async function loadBatches() {
     try {
       const { data } = await api.get('/batches', { params: { limit: 500 } })
@@ -71,21 +68,19 @@ export default function InternManagement() {
 
   useEffect(() => {
     // Debounce for text inputs
-    if (debounceTimer) {
-      clearTimeout(debounceTimer)
-    }
-
     const timer = setTimeout(() => {
       load()
     }, 300)
 
-    setDebounceTimer(timer)
-
     return () => clearTimeout(timer)
-  }, [nameFilter, emailFilter, techStackFilter, batchFilter, sortOption])
+  }, [load])
 
   async function createProfile(event) {
     event.preventDefault()
+    
+    // Clear previous errors
+    setError('')
+    setSuccess('')
     
     // Validate batch selection
     if (!form.batch_id) {
@@ -93,30 +88,50 @@ export default function InternManagement() {
       return
     }
     
+    // Validate required fields
+    if (!form.name.trim()) {
+      setError('Name is required.')
+      return
+    }
+    
+    if (!form.email.trim()) {
+      setError('Email is required.')
+      return
+    }
+    
     try {
-      await api.post('/profiles', {
-        name: form.name,
-        email: form.email,
-        tech_stack: form.tech_stack,
+      const payload = {
+        name: form.name.trim(),
+        email: form.email.trim().toLowerCase(),
+        tech_stack: form.tech_stack.trim() || null,
         role: 'INTERN',
-        batch_id: parseInt(form.batch_id),
-      })
+        batch_id: parseInt(form.batch_id, 10),
+      }
+      
+      await api.post('/profiles', payload)
+      
       setForm(EMPTY_FORM)
       setError('')
       setSuccess('Intern profile created successfully!')
       setTimeout(() => setSuccess(''), 3000)
       load()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to create intern profile.')
+      const errorMsg = err.response?.data?.detail || 'Failed to create intern profile.'
+      setError(errorMsg)
     }
   }
 
   async function saveProfile(id) {
     try {
-      await api.put(`/profiles/${id}`, {
-        ...editingForm,
-        batch_id: editingForm.batch_id || null,
-      })
+      const payload = {
+        name: editingForm.name.trim(),
+        email: editingForm.email.trim().toLowerCase(),
+        tech_stack: editingForm.tech_stack?.trim() || null,
+        batch_id: editingForm.batch_id ? parseInt(editingForm.batch_id, 10) : null,
+      }
+      
+      await api.put(`/profiles/${id}`, payload)
+      
       setEditingId(null)
       setEditingForm(EMPTY_FORM)
       setError('')

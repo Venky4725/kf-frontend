@@ -75,7 +75,7 @@ export default function SubmissionsView() {
       }
     }
     loadSubmissions()
-  }, [filters.user_id, filters.submitted_for, searchQuery, sortBy, sortOrder, interns.length])
+  }, [filters.user_id, filters.submitted_for, searchQuery, sortBy, sortOrder, interns])
 
   async function deleteSubmission(id) {
     if (!window.confirm('Delete this submission?')) return

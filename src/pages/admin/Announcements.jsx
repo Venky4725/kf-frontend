@@ -22,7 +22,6 @@ export default function Announcements() {
   
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
   const [readFilter, setReadFilter] = useState('')
 
   const canManage = user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD'
@@ -39,7 +38,6 @@ export default function Announcements() {
       const notificationParams = { limit: 500 }
       if (!canManage && user?.id) notificationParams.user_id = user.id
       if (searchQuery) notificationParams.search = searchQuery
-      if (typeFilter) notificationParams.type = typeFilter
       if (readFilter) notificationParams.is_read = readFilter === 'read'
 
       const notificationPromise = api.get('/notifications', { params: notificationParams })
@@ -56,7 +54,7 @@ export default function Announcements() {
     }
   }
 
-  useEffect(() => { if (user?.id) load() }, [user, searchQuery, typeFilter, readFilter])
+  useEffect(() => { if (user?.id) load() }, [user?.id, searchQuery, readFilter])
 
   async function createNotification(event) {
     event.preventDefault()
@@ -325,7 +323,7 @@ export default function Announcements() {
       {/* 2. Search and Filters */}
       <div className="card">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Search & Filter Notifications</h2>
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Search</label>
             <input
@@ -335,17 +333,6 @@ export default function Announcements() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
-            <select className="input" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              <option value="">All Types</option>
-              <option value="SYSTEM">SYSTEM</option>
-              <option value="INFO">INFO</option>
-              <option value="WARNING">WARNING</option>
-              <option value="SUCCESS">SUCCESS</option>
-              <option value="ERROR">ERROR</option>
-            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>

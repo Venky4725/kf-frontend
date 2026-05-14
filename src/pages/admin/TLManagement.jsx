@@ -237,14 +237,13 @@ export default function TLManagement() {
 
   function batchName(batchId) {
     if (!batchId) {
-      console.log('⚠️ Tech Lead has no batch_id assigned')
       return 'Unassigned'
     }
     
-    const batch = batches.find((batch) => batch.id === batchId)
+    const batch = batches.find((b) => b.id === batchId)
     
     if (!batch) {
-      console.warn('⚠️ Batch not found for batch_id:', batchId, 'Available batches:', batches)
+      console.warn('⚠️ Batch not found for batch_id:', batchId)
       return 'Unassigned'
     }
     
@@ -371,11 +370,7 @@ export default function TLManagement() {
                       {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                     </select>
                   ) : (
-                    <>
-                      {batchName(item.batch_id)}
-                      {/* Debug info */}
-                      {!item.batch_id && <span className="text-xs text-slate-400 ml-2">(No batch_id)</span>}
-                    </>
+                    batchName(item.batch_id)
                   )}
                 </td>
                 <td className="td">

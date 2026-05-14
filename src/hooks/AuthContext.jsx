@@ -7,8 +7,14 @@ const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    const raw = localStorage.getItem('kf_user')
-    return raw ? JSON.parse(raw) : null
+    try {
+      const raw = localStorage.getItem('kf_user')
+      return raw ? JSON.parse(raw) : null
+    } catch (err) {
+      console.error('Failed to parse stored user:', err)
+      localStorage.removeItem('kf_user')
+      return null
+    }
   })
   const [loading, setLoading] = useState(true)
 
@@ -27,7 +33,8 @@ export function AuthProvider({ children }) {
     }
 
     hydrateCurrentUser()
-      .catch(() => {
+      .catch((err) => {
+        console.error('Failed to hydrate user:', err)
         localStorage.removeItem('kf_token')
         localStorage.removeItem('kf_user')
         setUser(null)

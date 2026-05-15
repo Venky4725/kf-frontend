@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
+import { onEvent, EVENTS } from '../../utils/events'
 
 const EMPTY_FORM = { user_id: '', title: '', message: '' }
 const EMPTY_BROADCAST_FORM = { message: '' }
@@ -9,6 +10,7 @@ const EMPTY_BROADCAST_FORM = { message: '' }
 export default function Announcements() {
   const { user } = useAuth()
   const [profiles, setProfiles] = useState([])
+  const [batches, setBatches] = useState([])
   const [notifications, setNotifications] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
   const [broadcastForm, setBroadcastForm] = useState(EMPTY_BROADCAST_FORM)
@@ -23,13 +25,22 @@ export default function Announcements() {
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
   const [readFilter, setReadFilter] = useState('')
+  const [batchFilter, setBatchFilter] = useState('')
 
   const canManage = user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD'
   const isAdmin = user?.role === 'ADMIN'
   const profileMap = useMemo(() => Object.fromEntries(profiles.map((profile) => [profile.id, profile])), [profiles])
+  
+  // Filter profiles by selected batch for dropdown
+  const filteredProfilesForDropdown = useMemo(() => {
+    if (!batchFilter) return profiles
+    return profiles.filter(profile => String(profile.batch_id) === String(batchFilter))
+  }, [profiles, batchFilter])
 
   async function load() {
     try {
+      const batchesPromise = api.get('/batches', { params: { limit: 500 } })
+      
       const profilePromise = canManage
         ? api.get('/profiles', { params: { limit: 500 } })
         : Promise.resolve({ data: [user] })
@@ -42,8 +53,26 @@ export default function Announcements() {
 
       const notificationPromise = api.get('/notifications', { params: notificationParams })
 
-      const [profileList, notificationList] = await Promise.all([profilePromise, notificationPromise])
-      setProfiles(profileList.data || [])
+      const [batchesList, profileList, notificationList] = await Promise.all([batchesPromise, profilePromise, notificationPromise])
+      
+      // Set batches
+      const allBatches = batchesList.data || []
+      
+      // For TL, filter to assigned batches only
+      if (user?.role === 'TECHNICAL_LEAD') {
+        setBatches(allBatches) // TL sees only assigned batches from backend
+        
+        // Filter profiles to only show interns in assigned batches
+        const allowedBatchIds = new Set(allBatches.map(batch => batch.id))
+        const filteredProfiles = (profileList.data || []).filter(profile => 
+          allowedBatchIds.has(profile.batch_id)
+        )
+        setProfiles(filteredProfiles)
+      } else {
+        setBatches(allBatches)
+        setProfiles(profileList.data || [])
+      }
+      
       setNotifications(notificationList.data || [])
       setError('')
     } catch (err) {
@@ -51,10 +80,32 @@ export default function Announcements() {
       setError(err.response?.data?.detail || 'Failed to load notifications.')
       setNotifications([])
       setProfiles([])
+      setBatches([])
     }
   }
 
   useEffect(() => { if (user?.id) load() }, [user?.id, searchQuery, readFilter])
+  
+  // Listen for batch/TL/intern updates from other pages
+  useEffect(() => {
+    if (!user?.id) return
+    
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, () => {
+      load() // Reload all data
+    })
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, () => {
+      load() // Reload all data
+    })
+    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, () => {
+      load() // Reload all data
+    })
+    
+    return () => {
+      cleanupBatch()
+      cleanupTL()
+      cleanupIntern()
+    }
+  }, [user?.id])
 
   async function createNotification(event) {
     event.preventDefault()
@@ -290,13 +341,61 @@ export default function Announcements() {
       {canManage && (
         <form onSubmit={createNotification} className="card space-y-4">
           <h2 className="text-lg font-semibold text-slate-900">Send Individual Notification</h2>
-          <div className="grid md:grid-cols-3 gap-4">
-            <select className="input" value={form.user_id} onChange={(e) => setForm({ ...form, user_id: e.target.value })} required>
-              <option value="">Select recipient</option>
-              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} ({profile.role})</option>)}
-            </select>
-            <input className="input" placeholder="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
-            <input className="input" placeholder="Message" value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required />
+          <div className="grid md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Batch</label>
+              <select 
+                className="input" 
+                value={batchFilter} 
+                onChange={(e) => {
+                  setBatchFilter(e.target.value)
+                  setForm({ ...form, user_id: '' })
+                }}
+              >
+                <option value="">All Batches</option>
+                {batches.map((batch) => (
+                  <option key={batch.id} value={batch.id}>{batch.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Recipient *</label>
+              <select 
+                className="input" 
+                value={form.user_id} 
+                onChange={(e) => setForm({ ...form, user_id: e.target.value })} 
+                required
+                disabled={!batchFilter}
+              >
+                <option value="">Select recipient</option>
+                {filteredProfilesForDropdown.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{profile.name} ({profile.role})</option>
+                ))}
+              </select>
+              {!batchFilter && (
+                <p className="text-xs text-slate-500 mt-1">Select a batch first</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Title *</label>
+              <input 
+                className="input" 
+                placeholder="Title" 
+                value={form.title} 
+                onChange={(e) => setForm({ ...form, title: e.target.value })} 
+                required 
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Message *</label>
+              <input 
+                className="input" 
+                placeholder="Message" 
+                value={form.message} 
+                onChange={(e) => setForm({ ...form, message: e.target.value })} 
+                required 
+              />
+            </div>
           </div>
           <button className="btn-primary w-full" type="submit">Send Notification</button>
         </form>

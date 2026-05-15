@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
+import { onEvent, EVENTS } from '../../utils/events'
 
 const EMPTY_FORM = { intern_id: '', week_number: 1, score: 0, feedback: '' }
 
 export default function EvaluationsPage() {
   const { user } = useAuth()
   const [interns, setInterns] = useState([])
+  const [batches, setBatches] = useState([])
   const [evaluations, setEvaluations] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
@@ -17,6 +19,7 @@ export default function EvaluationsPage() {
   const [scoreMinFilter, setScoreMinFilter] = useState('')
   const [scoreMaxFilter, setScoreMaxFilter] = useState('')
   const [sortBy, setSortBy] = useState('newest') // newest, oldest, week_asc, week_desc, score_asc, score_desc, intern_asc, intern_desc
+  const [batchFilter, setBatchFilter] = useState('')
   
   // Edit Evaluation states (Admin and Technical Lead)
   const [editingEvaluation, setEditingEvaluation] = useState(null)
@@ -30,6 +33,12 @@ export default function EvaluationsPage() {
   const [selectedWeeks, setSelectedWeeks] = useState([])
 
   const internMap = useMemo(() => Object.fromEntries(interns.map((intern) => [intern.id, intern])), [interns])
+
+  // Filter interns by selected batch for dropdown
+  const filteredInternsForDropdown = useMemo(() => {
+    if (!batchFilter) return interns
+    return interns.filter(intern => String(intern.batch_id) === String(batchFilter))
+  }, [interns, batchFilter])
 
   // Filter and sort evaluations based on search, filters, and sorting
   const filteredAndSortedEvaluations = useMemo(() => {
@@ -53,7 +62,10 @@ export default function EvaluationsPage() {
       const matchesScoreMin = !scoreMinFilter || item.score >= Number(scoreMinFilter)
       const matchesScoreMax = !scoreMaxFilter || item.score <= Number(scoreMaxFilter)
       
-      return matchesSearch && matchesWeek && matchesIntern && matchesScoreMin && matchesScoreMax
+      // Batch filter (added for consistency with dashboard)
+      const matchesBatch = !batchFilter || internMap[item.intern_id]?.batch_id === batchFilter
+      
+      return matchesSearch && matchesWeek && matchesIntern && matchesScoreMin && matchesScoreMax && matchesBatch
     })
     
     // Step 2: Sort
@@ -94,17 +106,18 @@ export default function EvaluationsPage() {
     if (!user?.id) return
 
     try {
-      const [profiles, batches, evaluationList] = await Promise.all([
+      const [profiles, batchesRes, evaluationList] = await Promise.all([
         api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
-        user?.role === 'TECHNICAL_LEAD'
-          ? api.get('/batches', { params: { limit: 500 } })
-          : Promise.resolve({ data: [] }),
+        api.get('/batches', { params: { limit: 500 } }),
         // DO NOT filter by reviewed_by - show all evaluations from assigned batches
         api.get('/evaluations', { params: { limit: 500 } }),
       ])
 
+      // Set batches for all roles
+      setBatches(batchesRes.data || [])
+
       if (user?.role === 'TECHNICAL_LEAD') {
-        const allowedBatchIds = new Set((batches.data || []).map((batch) => batch.id))
+        const allowedBatchIds = new Set((batchesRes.data || []).map((batch) => batch.id))
         const filteredInterns = (profiles.data || []).filter((intern) => allowedBatchIds.has(intern.batch_id))
         setInterns(filteredInterns)
         
@@ -123,12 +136,32 @@ export default function EvaluationsPage() {
       console.error('❌ Failed to load evaluations:', err)
       setError(err.response?.data?.detail || 'Failed to load evaluations.')
       setInterns([])
+      setBatches([])
       setEvaluations([])
     }
   }
 
   useEffect(() => {
     load()
+  }, [user])
+  
+  // Listen for batch/TL/intern updates from other pages
+  useEffect(() => {
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, () => {
+      load() // Reload all data
+    })
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, () => {
+      load() // Reload all data
+    })
+    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, () => {
+      load() // Reload all data
+    })
+    
+    return () => {
+      cleanupBatch()
+      cleanupTL()
+      cleanupIntern()
+    }
   }, [user])
 
   async function createEvaluation(event) {
@@ -222,6 +255,7 @@ This action cannot be undone.`)) {
   // Clear all filters and reset to default view
   function clearFilters() {
     setSearchQuery('')
+    setBatchFilter('')
     setWeekFilter('')
     setInternFilter('')
     setScoreMinFilter('')
@@ -230,7 +264,7 @@ This action cannot be undone.`)) {
   }
 
   // Check if any filters are active
-  const hasActiveFilters = searchQuery || weekFilter || internFilter || scoreMinFilter || scoreMaxFilter || sortBy !== 'newest'
+  const hasActiveFilters = searchQuery || batchFilter || weekFilter || internFilter || scoreMinFilter || scoreMaxFilter || sortBy !== 'newest'
 
   async function downloadCSV() {
     if (filteredAndSortedEvaluations.length === 0) {
@@ -306,6 +340,24 @@ This action cannot be undone.`)) {
         <div className="grid md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">
+              Batch
+            </label>
+            <select 
+              className="input" 
+              value={batchFilter} 
+              onChange={(e) => {
+                setBatchFilter(e.target.value)
+                setForm({...form, intern_id: ''})
+              }}
+            >
+              <option value="">Select Batch</option>
+              {batches.map((batch) => (
+                <option key={batch.id} value={batch.id}>{batch.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
               Select Intern *
             </label>
             <select 
@@ -313,9 +365,10 @@ This action cannot be undone.`)) {
               value={form.intern_id} 
               onChange={(e) => setForm({ ...form, intern_id: e.target.value })} 
               required
+              disabled={!batchFilter}
             >
               <option value="">Choose an intern...</option>
-              {interns.map((intern) => (
+              {filteredInternsForDropdown.map((intern) => (
                 <option key={intern.id} value={intern.id}>{intern.name}</option>
               ))}
             </select>
@@ -393,7 +446,19 @@ This action cannot be undone.`)) {
         </div>
         
         {/* Search and Basic Filters */}
-        <div className="grid md:grid-cols-4 gap-4">
+        <div className="grid md:grid-cols-5 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Batch</label>
+            <select className="input" value={batchFilter} onChange={(e) => {
+              setBatchFilter(e.target.value)
+              setInternFilter('')
+            }}>
+              <option value="">All Batches</option>
+              {batches.map((batch) => (
+                <option key={batch.id} value={batch.id}>{batch.name}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Search</label>
             <input
@@ -406,9 +471,9 @@ This action cannot be undone.`)) {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Filter by Intern</label>
-            <select className="input" value={internFilter} onChange={(e) => setInternFilter(e.target.value)}>
+            <select className="input" value={internFilter} onChange={(e) => setInternFilter(e.target.value)} disabled={!batchFilter}>
               <option value="">All Interns</option>
-              {interns.map((intern) => (
+              {filteredInternsForDropdown.map((intern) => (
                 <option key={intern.id} value={intern.id}>{intern.name}</option>
               ))}
             </select>

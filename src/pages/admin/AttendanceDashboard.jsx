@@ -1,6 +1,7 @@
 import React from 'react'
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
+import { onEvent, EVENTS } from '../../utils/events'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell
@@ -50,7 +51,6 @@ export default function AttendanceDashboard() {
   const [batchFilter, setBatchFilter] = React.useState('')
   const [internFilter, setInternFilter] = React.useState('')
   const [statusFilter, setStatusFilter] = React.useState('')
-  const [internSearch, setInternSearch] = React.useState('')
   
   const isAdmin = user?.role === 'ADMIN'
   
@@ -105,6 +105,25 @@ export default function AttendanceDashboard() {
   React.useEffect(() => {
     loadData()
   }, [loadData])
+  
+  // Listen for batch/TL/intern updates from other pages
+  React.useEffect(() => {
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, () => {
+      loadData() // Reload all data
+    })
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, () => {
+      loadData() // Reload all data
+    })
+    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, () => {
+      loadData() // Reload all data
+    })
+    
+    return () => {
+      cleanupBatch()
+      cleanupTL()
+      cleanupIntern()
+    }
+  }, [])
 
   // Create lookup maps for efficient data access
   const internMap = React.useMemo(() => {
@@ -173,29 +192,8 @@ export default function AttendanceDashboard() {
       })
     }
     
-    // STEP 5: Intern Search Filter (name, email, or batch name)
-    if (internSearch && internSearch.trim()) {
-      const searchTerm = internSearch.trim().toLowerCase()
-      
-      filtered = filtered.filter(record => {
-        if (!record || !record.user_id) return false
-        
-        const intern = internMap[record.user_id]
-        if (!intern) return false
-        
-        const internName = (intern.name || '').toLowerCase()
-        const internEmail = (intern.email || '').toLowerCase()
-        const batch = batchMap[intern.batch_id]
-        const batchName = (batch?.name || '').toLowerCase()
-        
-        return internName.includes(searchTerm) ||
-               internEmail.includes(searchTerm) ||
-               batchName.includes(searchTerm)
-      })
-    }
-    
     return filtered
-  }, [attendanceData, dateRange, batchFilter, internFilter, statusFilter, internSearch, internMap, batchMap])
+  }, [attendanceData, dateRange, batchFilter, internFilter, statusFilter, internMap, batchMap])
 
   // Active filter summary for UX clarity
   const activeFilterSummary = React.useMemo(() => {
@@ -221,17 +219,13 @@ export default function AttendanceDashboard() {
       filters.push(`Status: ${statusFilter.toUpperCase()}`)
     }
     
-    if (internSearch && internSearch.trim()) {
-      filters.push(`Search: "${internSearch.trim()}"`)
-    }
-    
     return {
       hasFilters: filters.length > 0,
       summary: filters.join(' | '),
       count: filteredAttendanceData.length,
       total: attendanceData.length
     }
-  }, [dateRange, batchFilter, internFilter, statusFilter, internSearch, batches, interns, filteredAttendanceData, attendanceData])
+  }, [dateRange, batchFilter, internFilter, statusFilter, batches, interns, filteredAttendanceData, attendanceData])
 
   // Calculate summary metrics from FILTERED data
   const summaryMetrics = React.useMemo(() => {
@@ -488,10 +482,9 @@ export default function AttendanceDashboard() {
     setBatchFilter('')
     setInternFilter('')
     setStatusFilter('')
-    setInternSearch('')
   }
 
-  const hasActiveFilters = batchFilter || internFilter || statusFilter || internSearch
+  const hasActiveFilters = batchFilter || internFilter || statusFilter
 
   // Loading skeleton
   if (loading && attendanceData.length === 0) {
@@ -586,7 +579,7 @@ export default function AttendanceDashboard() {
           </div>
         </div>
         
-        <div className="grid md:grid-cols-6 gap-4">
+        <div className="grid md:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Start Date</label>
             <input
@@ -645,16 +638,6 @@ export default function AttendanceDashboard() {
               <option value="absent">Absent</option>
               <option value="late">Late</option>
             </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Search Intern</label>
-            <input
-              type="text"
-              className="input"
-              placeholder="Search by name..."
-              value={internSearch}
-              onChange={(e) => setInternSearch(e.target.value)}
-            />
           </div>
         </div>
       </div>

@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import React from 'react'
 
 import api from '../../lib/api'
+import { onEvent, EVENTS } from '../../utils/events'
 
 const EMPTY_FORM = { title: '', description: '', batch_id: '', due_date: '', assigned_to: '' }
 
@@ -62,6 +63,25 @@ export default function WeeklyPlans() {
   }
 
   useEffect(() => { load() }, [selectedBatch, sortBy, sortOrder])
+  
+  // Listen for batch/TL updates from other pages
+  useEffect(() => {
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, () => {
+      load() // Reload all data including batches and interns
+    })
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, () => {
+      load() // Reload all data
+    })
+    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, () => {
+      load() // Reload all data
+    })
+    
+    return () => {
+      cleanupBatch()
+      cleanupTL()
+      cleanupIntern()
+    }
+  }, [])
 
   // No longer need to load users based on batch selection
   // Users are loaded once with all data

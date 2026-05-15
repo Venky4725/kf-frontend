@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
+import { emitInternUpdate, onEvent, EVENTS } from '../../utils/events'
 
 const EMPTY_FORM = { name: '', email: '', tech_stack: '', batch_id: '' }
 
@@ -138,6 +139,9 @@ export default function InternManagement() {
       
       // Immediate refetch to update UI
       await load()
+      
+      // Emit event to notify other pages
+      emitInternUpdate()
     } catch (err) {
       console.error('❌ Failed to create intern:', err)
       
@@ -213,6 +217,9 @@ export default function InternManagement() {
       
       // Immediate refetch to update UI
       await load()
+      
+      // Emit event to notify other pages
+      emitInternUpdate()
     } catch (err) {
       console.error('❌ Failed to update intern:', err)
       
@@ -257,6 +264,9 @@ export default function InternManagement() {
       
       // Immediate refetch to update UI
       await load()
+      
+      // Emit event to notify other pages
+      emitInternUpdate()
     } catch (err) {
       console.error('❌ Failed to delete intern:', err)
       
@@ -264,6 +274,60 @@ export default function InternManagement() {
         setError('❌ Access denied: You can only delete interns in your assigned batches.')
       } else {
         const errorMsg = err.response?.data?.detail || 'Failed to delete intern profile.'
+        setError(`❌ ${errorMsg}`)
+      }
+    }
+  }
+
+  async function deactivateIntern(id, internName) {
+    if (!window.confirm(`Deactivate ${internName}?\n\nThis will prevent them from logging in.`)) return
+    
+    setError('')
+    
+    try {
+      await api.patch(`/profiles/${id}/deactivate`)
+      setSuccess(`✅ ${internName} has been deactivated successfully!`)
+      setTimeout(() => setSuccess(''), 3000)
+      
+      // Immediate refetch to update UI
+      await load()
+      
+      // Emit event to notify other pages
+      emitInternUpdate()
+    } catch (err) {
+      console.error('❌ Failed to deactivate intern:', err)
+      
+      if (err.response?.status === 403) {
+        setError('❌ Access denied.')
+      } else {
+        const errorMsg = err.response?.data?.detail || 'Failed to deactivate intern.'
+        setError(`❌ ${errorMsg}`)
+      }
+    }
+  }
+
+  async function activateIntern(id, internName) {
+    if (!window.confirm(`Activate ${internName}?\n\nThis will allow them to log in again.`)) return
+    
+    setError('')
+    
+    try {
+      await api.patch(`/profiles/${id}/activate`)
+      setSuccess(`✅ ${internName} has been activated successfully!`)
+      setTimeout(() => setSuccess(''), 3000)
+      
+      // Immediate refetch to update UI
+      await load()
+      
+      // Emit event to notify other pages
+      emitInternUpdate()
+    } catch (err) {
+      console.error('❌ Failed to activate intern:', err)
+      
+      if (err.response?.status === 403) {
+        setError('❌ Access denied.')
+      } else {
+        const errorMsg = err.response?.data?.detail || 'Failed to activate intern.'
         setError(`❌ ${errorMsg}`)
       }
     }
@@ -666,6 +730,21 @@ export default function InternManagement() {
                               >
                                 Edit
                               </button>
+                              {item.is_active ? (
+                                <button 
+                                  className="text-sm text-amber-700 font-semibold" 
+                                  onClick={() => deactivateIntern(item.id, item.name)}
+                                >
+                                  Deactivate
+                                </button>
+                              ) : (
+                                <button 
+                                  className="text-sm text-green-700 font-semibold" 
+                                  onClick={() => activateIntern(item.id, item.name)}
+                                >
+                                  Activate
+                                </button>
+                              )}
                               <button 
                                 className="text-sm text-rose-700 font-semibold" 
                                 onClick={() => deleteProfile(item.id)}

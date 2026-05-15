@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 
 import api from '../../lib/api'
 import { formatTechLeads } from '../../utils/formatters'
+import { emitBatchUpdate, emitTLUpdate, onEvent, EVENTS } from '../../utils/events'
 
 const EMPTY_FORM = { name: '', tech_stack: '', start_date: '', team_lead_ids: [] }
 
@@ -55,6 +56,14 @@ export default function BatchManagement() {
   }
 
   useEffect(() => { load() }, [])
+  
+  // Listen for TL updates from other pages
+  useEffect(() => {
+    const cleanup = onEvent(EVENTS.TL_UPDATED, () => {
+      load() // Reload both batches and TLs
+    })
+    return cleanup
+  }, [])
 
   async function createBatch(event) {
     event.preventDefault()
@@ -79,6 +88,10 @@ export default function BatchManagement() {
       
       // Immediate refetch to update UI
       await load()
+      
+      // Emit events to notify other pages
+      emitBatchUpdate()
+      emitTLUpdate()
     } catch (err) {
       console.error('❌ Failed to create batch:', err)
       const errorMsg = err.response?.data?.detail || 'Failed to create batch.'
@@ -109,6 +122,10 @@ export default function BatchManagement() {
       
       // Immediate refetch to update UI
       await load()
+      
+      // Emit events to notify other pages
+      emitBatchUpdate()
+      emitTLUpdate()
     } catch (err) {
       console.error('❌ Failed to update batch:', err)
       const errorMsg = err.response?.data?.detail || 'Failed to update batch.'
@@ -128,6 +145,10 @@ export default function BatchManagement() {
       
       // Immediate refetch to update UI
       await load()
+      
+      // Emit events to notify other pages
+      emitBatchUpdate()
+      emitTLUpdate()
     } catch (err) {
       console.error('❌ Failed to delete batch:', err)
       const errorMsg = err.response?.data?.detail || 'Failed to delete batch.'

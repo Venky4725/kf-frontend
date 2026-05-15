@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import api from '../../lib/api'
 import { validateEmail, validateName, validateTechStack, validateUUID } from '../../utils/validation'
+import { emitTLUpdate, emitBatchUpdate, onEvent, EVENTS } from '../../utils/events'
 
 const EMPTY_FORM = { name: '', email: '', tech_stack: '', batch_id: '' }
 
@@ -49,6 +50,14 @@ export default function TLManagement() {
 
   useEffect(() => { load() }, [])
   useEffect(() => { loadBatches() }, [])
+  
+  // Listen for batch updates from other pages
+  useEffect(() => {
+    const cleanup = onEvent(EVENTS.BATCH_UPDATED, () => {
+      loadBatches()
+    })
+    return cleanup
+  }, [])
 
   async function createProfile(event) {
     event.preventDefault()
@@ -114,8 +123,12 @@ export default function TLManagement() {
       setSuccess('✅ Technical lead created successfully!')
       setTimeout(() => setSuccess(''), 3000)
       
-      // Immediate refetch to update UI
-      await load()
+      // Immediate refetch to update UI - refresh both TLs and batches
+      await Promise.all([load(), loadBatches()])
+      
+      // Emit events to notify other pages
+      emitTLUpdate()
+      emitBatchUpdate()
     } catch (err) {
       console.error('❌ Failed to create technical lead:', err)
       
@@ -202,8 +215,12 @@ export default function TLManagement() {
       setSuccess('✅ Technical lead updated successfully!')
       setTimeout(() => setSuccess(''), 3000)
       
-      // Immediate refetch to update UI
-      await load()
+      // Immediate refetch to update UI - refresh both TLs and batches
+      await Promise.all([load(), loadBatches()])
+      
+      // Emit events to notify other pages
+      emitTLUpdate()
+      emitBatchUpdate()
     } catch (err) {
       console.error('❌ Failed to update technical lead:', err)
       
@@ -233,8 +250,12 @@ export default function TLManagement() {
       setSuccess('✅ Technical lead deactivated successfully!')
       setTimeout(() => setSuccess(''), 3000)
       
-      // Immediate refetch to update UI
-      await load()
+      // Immediate refetch to update UI - refresh both TLs and batches
+      await Promise.all([load(), loadBatches()])
+      
+      // Emit events to notify other pages
+      emitTLUpdate()
+      emitBatchUpdate()
     } catch (err) {
       console.error('❌ Failed to deactivate profile:', err)
       const errorMsg = err.response?.data?.detail || 'Failed to deactivate profile.'
@@ -254,8 +275,12 @@ export default function TLManagement() {
       setSuccess('✅ Technical lead activated successfully!')
       setTimeout(() => setSuccess(''), 3000)
       
-      // Immediate refetch to update UI
-      await load()
+      // Immediate refetch to update UI - refresh both TLs and batches
+      await Promise.all([load(), loadBatches()])
+      
+      // Emit events to notify other pages
+      emitTLUpdate()
+      emitBatchUpdate()
     } catch (err) {
       console.error('❌ Failed to activate profile:', err)
       const errorMsg = err.response?.data?.detail || 'Failed to activate profile.'

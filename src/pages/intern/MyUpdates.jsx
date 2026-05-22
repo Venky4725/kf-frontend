@@ -14,7 +14,6 @@ export default function MyUpdates() {
   const [message, setMessage] = useState('')
   
   // New States
-  const [quickFilter, setQuickFilter] = useState('TODAY')
   const [searchQuery, setSearchQuery] = useState('')
 
   async function load() {
@@ -40,7 +39,7 @@ export default function MyUpdates() {
 
   useEffect(() => { if (user?.id) load() }, [user])
 
-  // Date Logic for Filters
+  // Date Logic for Grouping
   const dateInfo = useMemo(() => {
     const now = new Date()
     now.setHours(0, 0, 0, 0)
@@ -48,16 +47,7 @@ export default function MyUpdates() {
     const tomorrow = new Date(now)
     tomorrow.setDate(tomorrow.getDate() + 1)
     
-    const day = now.getDay()
-    const diffToMonday = now.getDate() - day + (day === 0 ? -6 : 1)
-    const weekStart = new Date(now)
-    weekStart.setDate(diffToMonday)
-    
-    const weekEnd = new Date(weekStart)
-    weekEnd.setDate(weekEnd.getDate() + 6)
-    weekEnd.setHours(23, 59, 59, 999)
-
-    return { today: now, tomorrow, weekStart, weekEnd }
+    return { today: now, tomorrow }
   }, [])
 
   const filteredTasks = useMemo(() => {
@@ -72,32 +62,8 @@ export default function MyUpdates() {
       )
     }
 
-    // 2. Quick Date Filters
-    const { today, tomorrow, weekStart, weekEnd } = dateInfo
-    const todayStr = today.toISOString().split('T')[0]
-    const tomorrowStr = tomorrow.toISOString().split('T')[0]
-
-    if (quickFilter === 'TODAY') {
-      result = result.filter(t => t.due_date === todayStr)
-    } else if (quickFilter === 'TOMORROW') {
-      result = result.filter(t => t.due_date === tomorrowStr)
-    } else if (quickFilter === 'THIS_WEEK') {
-      result = result.filter(t => {
-        if (!t.due_date) return false
-        const d = new Date(t.due_date)
-        return d >= weekStart && d <= weekEnd
-      })
-    } else if (quickFilter === 'OVERDUE') {
-      result = result.filter(t => {
-        if (!t.due_date || t.status === 'COMPLETED') return false
-        return new Date(t.due_date) < today
-      })
-    } else if (quickFilter === 'COMPLETED') {
-      result = result.filter(t => t.status === 'COMPLETED')
-    }
-
     return result
-  }, [tasks, searchQuery, quickFilter, dateInfo])
+  }, [tasks, searchQuery])
 
   const groupedTasks = useMemo(() => {
     const groups = {}
@@ -129,37 +95,6 @@ export default function MyUpdates() {
       return new Date(a).getTime() - new Date(b).getTime()
     }).map(label => ({ label, tasks: groups[label] }))
   }, [filteredTasks, dateInfo])
-
-  const counts = useMemo(() => {
-    const { today, tomorrow, weekStart, weekEnd } = dateInfo
-    const todayStr = today.toISOString().split('T')[0]
-    const tomorrowStr = tomorrow.toISOString().split('T')[0]
-
-    return {
-      ALL: tasks.length,
-      TODAY: tasks.filter(t => t.due_date === todayStr).length,
-      TOMORROW: tasks.filter(t => t.due_date === tomorrowStr).length,
-      THIS_WEEK: tasks.filter(t => {
-        if (!t.due_date) return false
-        const d = new Date(t.due_date)
-        return d >= weekStart && d <= weekEnd
-      }).length,
-      OVERDUE: tasks.filter(t => {
-        if (!t.due_date || t.status === 'COMPLETED') return false
-        return new Date(t.due_date) < today
-      }).length,
-      COMPLETED: tasks.filter(t => t.status === 'COMPLETED').length,
-    }
-  }, [tasks, dateInfo])
-
-  const quickFilters = [
-    { id: 'TODAY', label: 'Today', count: counts.TODAY },
-    { id: 'TOMORROW', label: 'Tomorrow', count: counts.TOMORROW },
-    { id: 'THIS_WEEK', label: 'This Week', count: counts.THIS_WEEK },
-    { id: 'OVERDUE', label: 'Overdue', count: counts.OVERDUE, color: 'text-rose-600' },
-    { id: 'COMPLETED', label: 'Completed', count: counts.COMPLETED },
-    { id: 'ALL', label: 'All Tasks', count: counts.ALL },
-  ]
 
   async function submitUpdate(event) {
     event.preventDefault()
@@ -205,28 +140,6 @@ export default function MyUpdates() {
       <div>
         <h1 className="text-3xl font-black text-slate-900">My Updates</h1>
         <p className="text-sm text-slate-500 mt-2">Submit your daily progress and review the tasks assigned to your batch.</p>
-      </div>
-
-      {/* Quick Filters */}
-      <div className="flex flex-wrap gap-2">
-        {quickFilters.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setQuickFilter(f.id)}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
-              quickFilter === f.id
-                ? 'bg-brand-600 text-white border-brand-600 shadow-md scale-105'
-                : 'bg-white text-slate-600 border-slate-200 hover:border-brand-300 hover:bg-brand-50'
-            }`}
-          >
-            <span className={f.color || ''}>{f.label}</span>
-            <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] ${
-              quickFilter === f.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
-            }`}>
-              {f.count}
-            </span>
-          </button>
-        ))}
       </div>
 
       <div className="card">

@@ -174,28 +174,6 @@ export default function WeeklyPlans() {
     }).map(label => ({ label, tasks: groups[label] }))
   }, [filteredTasks, dateInfo])
 
-  const counts = useMemo(() => {
-    const { today, tomorrow, weekStart, weekEnd } = dateInfo
-    const todayStr = today.toISOString().split('T')[0]
-    const tomorrowStr = tomorrow.toISOString().split('T')[0]
-
-    return {
-      ALL: tasks.length,
-      TODAY: tasks.filter(t => t.due_date === todayStr).length,
-      TOMORROW: tasks.filter(t => t.due_date === tomorrowStr).length,
-      THIS_WEEK: tasks.filter(t => {
-        if (!t.due_date) return false
-        const d = new Date(t.due_date)
-        return d >= weekStart && d <= weekEnd
-      }).length,
-      OVERDUE: tasks.filter(t => {
-        if (!t.due_date || t.status === 'COMPLETED') return false
-        return new Date(t.due_date) < today
-      }).length,
-      COMPLETED: tasks.filter(t => t.status === 'COMPLETED').length,
-    }
-  }, [tasks, dateInfo])
-
   async function createTask(event) {
     event.preventDefault()
     setLoading(true)
@@ -251,15 +229,6 @@ export default function WeeklyPlans() {
   function batchName(batchId) {
     return batches.find((batch) => batch.id === batchId)?.name || 'Unknown batch'
   }
-
-  const quickFilters = [
-    { id: 'TODAY', label: 'Today', count: counts.TODAY },
-    { id: 'TOMORROW', label: 'Tomorrow', count: counts.TOMORROW },
-    { id: 'THIS_WEEK', label: 'This Week', count: counts.THIS_WEEK },
-    { id: 'OVERDUE', label: 'Overdue', count: counts.OVERDUE, color: 'text-rose-600' },
-    { id: 'COMPLETED', label: 'Completed', count: counts.COMPLETED },
-    { id: 'ALL', label: 'All Tasks', count: counts.ALL },
-  ]
 
   return (
     <div className="space-y-6">

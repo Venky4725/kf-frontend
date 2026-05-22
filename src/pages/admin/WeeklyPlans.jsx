@@ -228,25 +228,36 @@ export default function WeeklyPlans() {
       if (isBulk) {
         if (previewTasks.length === 0) { setError('No tasks to create.'); setLoading(false); return }
         
-        // Prepare payload for bulk creation
+        // Prepare payload for bulk creation with explicit string casting and defaults
         const payload = {
-          batch_id: form.batch_id,
-          assigned_to: form.assigned_to || null,
+          batch_id: String(form.batch_id || ""),
+          assigned_to: form.assigned_to ? String(form.assigned_to) : null,
           tasks: previewTasks.map(t => ({
-            title: t.title,
-            description: t.description || '',
-            due_date: t.due_date || null,
-            priority: 'MEDIUM',
-            status: 'PENDING'
+            title: String(t.title || ""),
+            description: String(t.description || ""),
+            due_date: t.due_date ? String(t.due_date) : null,
+            priority: String(t.priority || "MEDIUM"),
+            status: String(t.status || "PENDING")
           }))
         }
+
+        console.log('🚀 Bulk Task Payload:', payload)
 
         const res = await api.post('/tasks/bulk', payload)
         setBulkInput(''); setPreviewTasks([]); setForm(EMPTY_FORM)
         const createdCount = res.data.count ?? res.data.created_count ?? previewTasks.length
         setSuccess(`${createdCount} tasks created successfully!`)
       } else {
-        const payload = { ...form, due_date: form.due_date || null, assigned_to: form.assigned_to || null }
+        const payload = { 
+          ...form, 
+          title: String(form.title || ""),
+          description: String(form.description || ""),
+          due_date: form.due_date ? String(form.due_date) : null,
+          assigned_to: form.assigned_to ? String(form.assigned_to) : null 
+        }
+        
+        console.log('🚀 Single Task Payload:', payload)
+        
         await api.post('/tasks', payload)
         setForm(EMPTY_FORM)
         setSuccess('Task created successfully!')

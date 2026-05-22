@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
@@ -12,6 +12,10 @@ export default function MyUpdates() {
     content: '',
   })
   const [message, setMessage] = useState('')
+  
+  // New States
+  const [quickFilter, setQuickFilter] = useState('TODAY')
+  const [searchQuery, setSearchQuery] = useState('')
 
   async function load() {
     if (!user?.id) return
@@ -35,6 +39,127 @@ export default function MyUpdates() {
   }
 
   useEffect(() => { if (user?.id) load() }, [user])
+
+  // Date Logic for Filters
+  const dateInfo = useMemo(() => {
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    
+    const day = now.getDay()
+    const diffToMonday = now.getDate() - day + (day === 0 ? -6 : 1)
+    const weekStart = new Date(now)
+    weekStart.setDate(diffToMonday)
+    
+    const weekEnd = new Date(weekStart)
+    weekEnd.setDate(weekEnd.getDate() + 6)
+    weekEnd.setHours(23, 59, 59, 999)
+
+    return { today: now, tomorrow, weekStart, weekEnd }
+  }, [])
+
+  const filteredTasks = useMemo(() => {
+    let result = [...tasks]
+
+    // 1. Search filter
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter(t => 
+        t.title.toLowerCase().includes(q) || 
+        (t.description && t.description.toLowerCase().includes(q))
+      )
+    }
+
+    // 2. Quick Date Filters
+    const { today, tomorrow, weekStart, weekEnd } = dateInfo
+    const todayStr = today.toISOString().split('T')[0]
+    const tomorrowStr = tomorrow.toISOString().split('T')[0]
+
+    if (quickFilter === 'TODAY') {
+      result = result.filter(t => t.due_date === todayStr)
+    } else if (quickFilter === 'TOMORROW') {
+      result = result.filter(t => t.due_date === tomorrowStr)
+    } else if (quickFilter === 'THIS_WEEK') {
+      result = result.filter(t => {
+        if (!t.due_date) return false
+        const d = new Date(t.due_date)
+        return d >= weekStart && d <= weekEnd
+      })
+    } else if (quickFilter === 'OVERDUE') {
+      result = result.filter(t => {
+        if (!t.due_date || t.status === 'COMPLETED') return false
+        return new Date(t.due_date) < today
+      })
+    } else if (quickFilter === 'COMPLETED') {
+      result = result.filter(t => t.status === 'COMPLETED')
+    }
+
+    return result
+  }, [tasks, searchQuery, quickFilter, dateInfo])
+
+  const groupedTasks = useMemo(() => {
+    const groups = {}
+    const { today, tomorrow } = dateInfo
+    const todayStr = today.toISOString().split('T')[0]
+    const tomorrowStr = tomorrow.toISOString().split('T')[0]
+
+    filteredTasks.forEach(task => {
+      let label = 'No Due Date'
+      if (task.due_date) {
+        if (task.due_date === todayStr) label = 'Today'
+        else if (task.due_date === tomorrowStr) label = 'Tomorrow'
+        else {
+          const d = new Date(task.due_date)
+          label = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+        }
+      }
+      if (!groups[label]) groups[label] = []
+      groups[label].push(task)
+    })
+
+    return Object.keys(groups).sort((a, b) => {
+      if (a === 'Today') return -1
+      if (b === 'Today') return 1
+      if (a === 'Tomorrow') return -1
+      if (b === 'Tomorrow') return 1
+      if (a === 'No Due Date') return 1
+      if (b === 'No Due Date') return -1
+      return new Date(a).getTime() - new Date(b).getTime()
+    }).map(label => ({ label, tasks: groups[label] }))
+  }, [filteredTasks, dateInfo])
+
+  const counts = useMemo(() => {
+    const { today, tomorrow, weekStart, weekEnd } = dateInfo
+    const todayStr = today.toISOString().split('T')[0]
+    const tomorrowStr = tomorrow.toISOString().split('T')[0]
+
+    return {
+      ALL: tasks.length,
+      TODAY: tasks.filter(t => t.due_date === todayStr).length,
+      TOMORROW: tasks.filter(t => t.due_date === tomorrowStr).length,
+      THIS_WEEK: tasks.filter(t => {
+        if (!t.due_date) return false
+        const d = new Date(t.due_date)
+        return d >= weekStart && d <= weekEnd
+      }).length,
+      OVERDUE: tasks.filter(t => {
+        if (!t.due_date || t.status === 'COMPLETED') return false
+        return new Date(t.due_date) < today
+      }).length,
+      COMPLETED: tasks.filter(t => t.status === 'COMPLETED').length,
+    }
+  }, [tasks, dateInfo])
+
+  const quickFilters = [
+    { id: 'TODAY', label: 'Today', count: counts.TODAY },
+    { id: 'TOMORROW', label: 'Tomorrow', count: counts.TOMORROW },
+    { id: 'THIS_WEEK', label: 'This Week', count: counts.THIS_WEEK },
+    { id: 'OVERDUE', label: 'Overdue', count: counts.OVERDUE, color: 'text-rose-600' },
+    { id: 'COMPLETED', label: 'Completed', count: counts.COMPLETED },
+    { id: 'ALL', label: 'All Tasks', count: counts.ALL },
+  ]
 
   async function submitUpdate(event) {
     event.preventDefault()
@@ -82,17 +207,75 @@ export default function MyUpdates() {
         <p className="text-sm text-slate-500 mt-2">Submit your daily progress and review the tasks assigned to your batch.</p>
       </div>
 
+      {/* Quick Filters */}
+      <div className="flex flex-wrap gap-2">
+        {quickFilters.map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setQuickFilter(f.id)}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
+              quickFilter === f.id
+                ? 'bg-brand-600 text-white border-brand-600 shadow-md scale-105'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-brand-300 hover:bg-brand-50'
+            }`}
+          >
+            <span className={f.color || ''}>{f.label}</span>
+            <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] ${
+              quickFilter === f.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+            }`}>
+              {f.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
       <div className="card">
+        <div className="mb-6">
+          <label className="block text-sm font-bold text-slate-700 mb-2">Search Tasks</label>
+          <div className="relative">
+            <input
+              className="input pl-9"
+              placeholder="Search by title or description..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <svg className="absolute left-3 top-2.5 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          </div>
+        </div>
+
         <h2 className="text-lg font-semibold mb-4">Assigned Tasks</h2>
-        <div className="space-y-3">
-          {tasks.length === 0 && <div className="text-sm text-slate-500">No tasks assigned to your batch yet.</div>}
-          {tasks.map((task) => (
-            <div key={task.id} className="rounded-xl border border-slate-200 p-4">
-              <div className="font-semibold text-slate-900">{task.title}</div>
-              <div className="text-sm text-slate-700 mt-2">{task.description || 'No description provided.'}</div>
-              <div className="text-xs text-slate-400 mt-3">Due: {task.due_date || 'Not set'}</div>
-            </div>
-          ))}
+        <div className="space-y-8">
+          {groupedTasks.length === 0 ? (
+            <div className="text-sm text-slate-500 italic py-4">No tasks found for this filter.</div>
+          ) : (
+            groupedTasks.map((group) => (
+              <div key={group.label} className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">{group.label}</h3>
+                  <div className="h-px w-full bg-slate-100"></div>
+                </div>
+                <div className="space-y-3">
+                  {group.tasks.map((task) => (
+                    <div key={task.id} className="rounded-xl border border-slate-200 p-4 hover:border-brand-300 transition-colors bg-white">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                          task.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {(task.status || 'PENDING').replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div className="font-semibold text-slate-900">{task.title}</div>
+                      <div className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{task.description || 'No description provided.'}</div>
+                      <div className="flex items-center gap-2 mt-3 text-xs text-slate-400">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        Due: {task.due_date || 'Not set'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

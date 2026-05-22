@@ -3,14 +3,9 @@ import React from 'react'
 
 import api from '../../lib/api'
 import { onEvent, EVENTS } from '../../utils/events'
+import { useAuth } from '../../hooks/AuthContext'
 
 const EMPTY_FORM = { title: '', description: '', batch_id: '', due_date: '', assigned_to: '', priority: 'MEDIUM', status: 'PENDING' }
-
-const PRIORITY_OPTIONS = [
-  { label: 'Low', value: 'LOW', color: 'bg-slate-100 text-slate-700' },
-  { label: 'Medium', value: 'MEDIUM', color: 'bg-blue-100 text-blue-700' },
-  { label: 'High', value: 'HIGH', color: 'bg-rose-100 text-rose-700' },
-]
 
 const STATUS_OPTIONS = [
   { label: 'Pending', value: 'PENDING', color: 'bg-amber-100 text-amber-700' },
@@ -51,6 +46,7 @@ function TaskDescription({ text }) {
 }
 
 export default function WeeklyPlans() {
+  const { user } = useAuth()
   const [tasks, setTasks] = useState([])
   const [batches, setBatches] = useState([])
   const [allUsers, setAllUsers] = useState([])
@@ -59,14 +55,16 @@ export default function WeeklyPlans() {
   const [isBulk, setIsBulk] = useState(false)
   const [bulkInput, setBulkInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [selectedBatch, setSelectedBatch] = useState('')
-  const [sortBy, setSortBy] = useState('created_at')
-  const [sortOrder, setSortOrder] = useState('desc')
   const [editingId, setEditingId] = useState(null)
   const [editingForm, setEditingForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   
+  // Updated Filter States
+  const [searchQuery, setSearchQuery] = useState('')
+  const [dateFilter, setDateFilter] = useState('')
+  const [selectedBatch, setSelectedBatch] = useState('')
+
   const parsedTasks = useMemo(() => {
     return bulkInput.split('\n').map(line => line.trim()).filter(line => line.length > 0)
   }, [bulkInput])
@@ -80,7 +78,6 @@ export default function WeeklyPlans() {
     try {
       const params = { limit: 500 }
       if (selectedBatch) params.batch_id = selectedBatch
-      if (sortBy) { params.sort_by = sortBy; params.order = sortOrder }
       const [taskList, batchList, userList, internList] = await Promise.all([
         api.get('/tasks', { params }),
         api.get('/batches', { params: { limit: 500 } }),
@@ -99,7 +96,7 @@ export default function WeeklyPlans() {
     }
   }
 
-  useEffect(() => { load() }, [selectedBatch, sortBy, sortOrder])
+  useEffect(() => { load() }, [selectedBatch])
   
   useEffect(() => {
     const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, load)
@@ -108,6 +105,97 @@ export default function WeeklyPlans() {
     return () => { cleanupBatch(); cleanupTL(); cleanupIntern() }
   }, [])
 
+  // Date Logic for Grouping
+  const dateInfo = useMemo(() => {
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    
+    return { today: now, tomorrow }
+  }, [])
+
+  const filteredTasks = useMemo(() => {
+    let result = [...tasks]
+
+    // 1. Search filter (Intern Name or Task Title)
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter(t => 
+        t.title.toLowerCase().includes(q) || 
+        (t.assigned_to_name && t.assigned_to_name.toLowerCase().includes(q))
+      )
+    }
+
+    // 2. Date Filter
+    if (dateFilter) {
+      result = result.filter(t => t.due_date === dateFilter)
+    }
+
+    // Default sorting for consistency
+    result.sort((a, b) => {
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return new Date(a.due_date) - new Date(b.due_date)
+    })
+
+    return result
+  }, [tasks, searchQuery, dateFilter])
+
+  const groupedTasks = useMemo(() => {
+    const groups = {}
+    const { today, tomorrow } = dateInfo
+    const todayStr = today.toISOString().split('T')[0]
+    const tomorrowStr = tomorrow.toISOString().split('T')[0]
+
+    filteredTasks.forEach(task => {
+      let label = 'No Due Date'
+      if (task.due_date) {
+        if (task.due_date === todayStr) label = 'Today'
+        else if (task.due_date === tomorrowStr) label = 'Tomorrow'
+        else {
+          const d = new Date(task.due_date)
+          label = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+        }
+      }
+      if (!groups[label]) groups[label] = []
+      groups[label].push(task)
+    })
+
+    return Object.keys(groups).sort((a, b) => {
+      if (a === 'Today') return -1
+      if (b === 'Today') return 1
+      if (a === 'Tomorrow') return -1
+      if (b === 'Tomorrow') return 1
+      if (a === 'No Due Date') return 1
+      if (b === 'No Due Date') return -1
+      return new Date(a).getTime() - new Date(b).getTime()
+    }).map(label => ({ label, tasks: groups[label] }))
+  }, [filteredTasks, dateInfo])
+
+  const counts = useMemo(() => {
+    const { today, tomorrow, weekStart, weekEnd } = dateInfo
+    const todayStr = today.toISOString().split('T')[0]
+    const tomorrowStr = tomorrow.toISOString().split('T')[0]
+
+    return {
+      ALL: tasks.length,
+      TODAY: tasks.filter(t => t.due_date === todayStr).length,
+      TOMORROW: tasks.filter(t => t.due_date === tomorrowStr).length,
+      THIS_WEEK: tasks.filter(t => {
+        if (!t.due_date) return false
+        const d = new Date(t.due_date)
+        return d >= weekStart && d <= weekEnd
+      }).length,
+      OVERDUE: tasks.filter(t => {
+        if (!t.due_date || t.status === 'COMPLETED') return false
+        return new Date(t.due_date) < today
+      }).length,
+      COMPLETED: tasks.filter(t => t.status === 'COMPLETED').length,
+    }
+  }, [tasks, dateInfo])
+
   async function createTask(event) {
     event.preventDefault()
     setLoading(true)
@@ -115,16 +203,15 @@ export default function WeeklyPlans() {
     try {
       if (isBulk) {
         if (parsedTasks.length === 0) { setError('Please enter at least one task.'); setLoading(false); return }
-        const tasksPayload = parsedTasks.map(title => ({
-          title,
-          description: form.description,
+        
+        const payload = {
+          tasks: parsedTasks,
           batch_id: form.batch_id,
           due_date: form.due_date || null,
-          assigned_to: form.assigned_to || null,
-          priority: 'LOW',
-          status: 'PENDING'
-        }))
-        const res = await api.post('/tasks/bulk', { tasks: tasksPayload })
+          assigned_to: form.assigned_to || null
+        }
+
+        const res = await api.post('/tasks/bulk', payload)
         setBulkInput(''); setForm(EMPTY_FORM)
         const createdCount = res.data.count ?? res.data.created_count ?? parsedTasks.length
         const failedCount = res.data.failed_count ?? 0
@@ -164,6 +251,15 @@ export default function WeeklyPlans() {
   function batchName(batchId) {
     return batches.find((batch) => batch.id === batchId)?.name || 'Unknown batch'
   }
+
+  const quickFilters = [
+    { id: 'TODAY', label: 'Today', count: counts.TODAY },
+    { id: 'TOMORROW', label: 'Tomorrow', count: counts.TOMORROW },
+    { id: 'THIS_WEEK', label: 'This Week', count: counts.THIS_WEEK },
+    { id: 'OVERDUE', label: 'Overdue', count: counts.OVERDUE, color: 'text-rose-600' },
+    { id: 'COMPLETED', label: 'Completed', count: counts.COMPLETED },
+    { id: 'ALL', label: 'All Tasks', count: counts.ALL },
+  ]
 
   return (
     <div className="space-y-6">
@@ -222,7 +318,7 @@ export default function WeeklyPlans() {
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="label">Target Batch *</label>
               <select className="input" value={form.batch_id} onChange={(e) => setForm({ ...form, batch_id: e.target.value, assigned_to: '' })} required>
@@ -237,22 +333,6 @@ export default function WeeklyPlans() {
                 {filteredInterns.map((intern) => <option key={intern.id} value={intern.id}>{intern.name}</option>)}
               </select>
             </div>
-            {!isBulk && (
-              <>
-                <div className="space-y-1">
-                  <label className="label">Priority</label>
-                  <select className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-                    {PRIORITY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="label">Initial Status</label>
-                  <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                    {STATUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                  </select>
-                </div>
-              </>
-            )}
           </div>
         </div>
 
@@ -268,138 +348,128 @@ export default function WeeklyPlans() {
         </button>
       </form>
 
-      {/* 2. Filters Section (MIDDLE) */}
+      {/* 2. Simplified Search & Filter (NEW) */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Filter & Sort Tasks</h2>
+        <h2 className="text-lg font-bold text-slate-900 mb-4">Search & Filter</h2>
         <div className="grid md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Search Intern</label>
+            <div className="relative">
+              <input
+                className="input pl-9"
+                placeholder="Search by name..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              <svg className="absolute left-3 top-2.5 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            </div>
+          </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Filter by Batch</label>
             <select className="input" value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)}>
-              <option value="">All batches</option>
+              <option value="">All Batches</option>
               {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Sort By</label>
-            <select className="input" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-              <option value="created_at">Created Date</option>
-              <option value="title">Title</option>
-              <option value="due_date">Due Date</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Order</label>
-            <select className="input" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
-            </select>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Select Date</label>
+            <input
+              className="input"
+              type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+            />
           </div>
         </div>
       </div>
 
       {/* 3. Tasks List (BOTTOM) */}
-      <div className="space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
-          <h2 className="text-xl font-bold text-slate-900">All Tasks</h2>
-          <div className="bg-brand-50 text-brand-700 text-xs font-bold px-3 py-1 rounded-full border border-brand-100 uppercase tracking-tight">
-            {tasks.length} {tasks.length === 1 ? 'Task' : 'Tasks'} Found
-          </div>
-        </div>
-
-        <div className="grid gap-4">
-          {tasks.map((item) => (
-            <div key={item.id} className="card hover:shadow-md transition-shadow border-slate-200">
-              {editingId === item.id ? (
-                <div className="space-y-4">
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Title</label>
-                      <input className="input" value={editingForm.title} onChange={(e) => setEditingForm({ ...editingForm, title: e.target.value })} />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Due Date</label>
-                      <input className="input" type="date" value={editingForm.due_date || ''} onChange={(e) => setEditingForm({ ...editingForm, due_date: e.target.value })} />
-                    </div>
-                  </div>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Priority</label>
-                      <select className="input" value={editingForm.priority} onChange={(e) => setEditingForm({ ...editingForm, priority: e.target.value })}>
-                        {PRIORITY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status</label>
-                      <select className="input" value={editingForm.status} onChange={(e) => setEditingForm({ ...editingForm, status: e.target.value })}>
-                        {STATUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description</label>
-                    <textarea className="input min-h-[120px]" value={editingForm.description || ''} onChange={(e) => setEditingForm({ ...editingForm, description: e.target.value })} />
-                  </div>
-                  <div className="flex justify-end gap-3 pt-2">
-                    <button className="btn-ghost" onClick={() => setEditingId(null)}>Cancel</button>
-                    <button className="btn-primary" onClick={() => saveTask(item.id)}>Save Changes</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 space-y-3">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${PRIORITY_OPTIONS.find(o => o.value === item.priority)?.color || 'bg-slate-100 text-slate-700'}`}>
-                            {item.priority || 'MEDIUM'}
-                          </span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${STATUS_OPTIONS.find(o => o.value === item.status)?.color || 'bg-slate-100 text-slate-700'}`}>
-                            {(item.status || 'PENDING').replace('_', ' ')}
-                          </span>
-                        </div>
-                        <h3 className="text-lg font-bold text-slate-900 leading-tight break-words">{item.title}</h3>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium text-slate-600">
-                            <svg className="text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                            {batchName(item.batch_id)}
-                          </div>
-                          <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium text-slate-600">
-                            <svg className="text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                            {item.assigned_to_name || 'All batch members'}
-                          </div>
-                          {item.due_date && (
-                            <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 border border-amber-100 rounded text-xs font-medium text-amber-700">
-                              <svg className="text-amber-500" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                              Due: {item.due_date}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 gap-1">
-                      <button className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors" title="Edit Task" onClick={() => { setEditingId(item.id); setEditingForm({ ...item, description: item.description || '', due_date: item.due_date || '', priority: item.priority || 'MEDIUM', status: item.status || 'PENDING' }) }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                      </button>
-                      <button className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Delete Task" onClick={() => deleteTask(item.id)}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="pt-3 border-t border-slate-100"><TaskDescription text={item.description} /></div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {tasks.length === 0 && (
+      <div className="space-y-8">
+        {groupedTasks.length === 0 ? (
           <div className="card text-center py-16 bg-slate-50 border-dashed border-2 border-slate-200">
             <div className="mx-auto w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-300">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
             </div>
             <h3 className="text-lg font-semibold text-slate-900">No tasks found</h3>
-            <p className="text-slate-500 mt-1">Try adjusting your filters or create a new task above.</p>
+            <p className="text-slate-500 mt-1">Try adjusting your filters or search query.</p>
           </div>
+        ) : (
+          groupedTasks.map((group) => (
+            <div key={group.label} className="space-y-4">
+              <div className="flex items-center gap-4">
+                <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">{group.label}</h3>
+                <div className="h-px w-full bg-slate-200"></div>
+                <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{group.tasks.length}</span>
+              </div>
+              <div className="grid gap-4">
+                {group.tasks.map((item) => (
+                  <div key={item.id} className="card hover:shadow-md transition-shadow border-slate-200 group">
+                    {editingId === item.id ? (
+                      <div className="space-y-4">
+                        <div className="grid md:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Title</label>
+                            <input className="input" value={editingForm.title} onChange={(e) => setEditingForm({ ...editingForm, title: e.target.value })} />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Due Date</label>
+                            <input className="input" type="date" value={editingForm.due_date || ''} onChange={(e) => setEditingForm({ ...editingForm, due_date: e.target.value })} />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description</label>
+                          <textarea className="input min-h-[120px]" value={editingForm.description || ''} onChange={(e) => setEditingForm({ ...editingForm, description: e.target.value })} />
+                        </div>
+                        <div className="flex justify-end gap-3 pt-2">
+                          <button className="btn-ghost" onClick={() => setEditingId(null)}>Cancel</button>
+                          <button className="btn-primary" onClick={() => saveTask(item.id)}>Save Changes</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 space-y-3">
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-900 leading-tight break-words">{item.title}</h3>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium text-slate-600">
+                                  <svg className="text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                                  {batchName(item.batch_id)}
+                                </div>
+                                <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium text-slate-600">
+                                  <svg className="text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                                  {item.assigned_to_name || 'All batch members'}
+                                </div>
+                                {item.due_date && (
+                                  <div className={`flex items-center gap-1.5 px-2 py-1 border rounded text-xs font-medium ${
+                                    new Date(item.due_date) < dateInfo.today && item.status !== 'COMPLETED'
+                                      ? 'bg-rose-50 border-rose-100 text-rose-700'
+                                      : 'bg-amber-50 border-amber-100 text-amber-700'
+                                  }`}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                                    Due: {item.due_date}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors" title="Edit Task" onClick={() => { setEditingId(item.id); setEditingForm({ ...item, description: item.description || '', due_date: item.due_date || '', status: item.status || 'PENDING' }) }}>
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                            </button>
+                            <button className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Delete Task" onClick={() => deleteTask(item.id)}>
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="pt-3 border-t border-slate-100"><TaskDescription text={item.description} /></div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
         )}
       </div>
     </div>

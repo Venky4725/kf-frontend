@@ -28,7 +28,7 @@ export default function InternDashboard() {
 
         const [tasks, submissions, evaluations, notifications] = await Promise.all(requests)
         setData({
-          tasks: tasks.data || [],
+          tasks: (tasks.data || []).filter(t => !t.description?.startsWith('[ROADMAP]')),
           submissions: submissions.data || [],
           evaluations: evaluations.data || [],
           notifications: notifications.data || [],

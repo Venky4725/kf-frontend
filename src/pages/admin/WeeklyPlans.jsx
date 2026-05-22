@@ -62,6 +62,8 @@ export default function WeeklyPlans() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [showRoadmapModal, setShowRoadmapModal] = useState(false)
+  const [isParsing, setIsParsing] = useState(false)
+  const [parseError, setParseError] = useState('')
   
   // Updated Filter States
   const [searchQuery, setSearchQuery] = useState('')
@@ -72,54 +74,56 @@ export default function WeeklyPlans() {
   useEffect(() => {
     if (!bulkInput.trim()) {
       setPreviewTasks([])
+      setParseError('')
       return
     }
 
-    const lines = bulkInput.split('\n').map(l => l.trim()).filter(l => l.length > 0)
-    let parsed = []
-
     if (importMode === 'SIMPLE') {
-      parsed = lines.map(line => ({
+      const lines = bulkInput.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+      const parsed = lines.map(line => ({
         title: line,
         description: form.description || '',
         due_date: form.due_date || null
       }))
+      setPreviewTasks(parsed)
+      setParseError('')
     } else {
-      // Roadmap Parser (Pipe, Tab, or Multiple Spaces separated)
-      // Expected Columns: Day | Topic | Activities | Outcome
-      parsed = lines.map(line => {
-        // Skip header lines
-        if (line.toLowerCase().includes('day') && line.toLowerCase().includes('topic')) return null;
-        
-        // Handle pipe, tab, or double+ space as delimiters
-        const parts = line.split(/[|\t]|\s{2,}/).map(p => p.trim()).filter(p => p.length > 0)
-        
-        if (parts.length >= 2) {
-          const dayRaw = parts[0]
-          const topic = parts[1] || 'Untitled Topic'
-          const activities = parts[2] || '—'
-          const outcome = parts[3] || '—'
-          
-          let extractedDate = null
-          const dateMatch = dayRaw.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+/i)
-          if (dateMatch) {
-            const d = new Date(`${dateMatch[0]} ${new Date().getFullYear()}`)
-            if (!isNaN(d.getTime())) extractedDate = d.toISOString().split('T')[0]
-          }
-
-          return {
-            title: topic,
-            description: `[ROADMAP]${activities}$$$${outcome}$$$${dayRaw}`,
-            due_date: extractedDate || form.due_date || null,
-            is_roadmap: true
-          }
-        }
-        return null
-      }).filter(t => t !== null)
+      // Roadmap mode: backend parsing triggered by a debounced effect or manual button
+      // To follow "when pasted" accurately, we'll trigger after a small delay
+      const timer = setTimeout(handleParseRoadmap, 1000)
+      return () => clearTimeout(timer)
     }
+  }, [bulkInput, importMode])
 
-    setPreviewTasks(parsed)
-  }, [bulkInput, importMode, form.due_date, form.description])
+  async function handleParseRoadmap() {
+    if (!bulkInput.trim() || importMode !== 'ROADMAP') return
+    
+    setIsParsing(true)
+    setParseError('')
+    try {
+      const res = await api.post('/tasks/parse-roadmap', { raw_text: bulkInput })
+      if (res.data && Array.isArray(res.data.entries)) {
+        const parsed = res.data.entries.map(e => ({
+          title: String(e.topic || e.title || 'Untitled Topic'),
+          description: `[ROADMAP]${e.activities || '—'}$$$${e.outcome || '—'}$$$${e.day || 'N/A'}`,
+          due_date: e.due_date || null,
+          is_roadmap: true
+        }))
+        setPreviewTasks(parsed)
+        if (parsed.length === 0) {
+          setParseError('Could not detect roadmap structure. Please ensure each day contains:\nDay\nTopic\nActivities\nOutcome')
+        }
+      } else {
+        setParseError('Unexpected response format from parser.')
+      }
+    } catch (err) {
+      console.error('Syllabus parsing failed:', err)
+      setParseError('Could not detect roadmap structure. Please ensure each day contains:\nDay\nTopic\nActivities\nOutcome')
+      setPreviewTasks([])
+    } finally {
+      setIsParsing(false)
+    }
+  }
 
   const filteredInterns = React.useMemo(() => {
     if (!form.batch_id) return []
@@ -275,7 +279,6 @@ export default function WeeklyPlans() {
                     <tr key={task.id} className="hover:bg-slate-50/50 transition-colors group">
                       <td className="px-4 py-4 align-top">
                         <div className="text-sm font-bold text-slate-900 leading-tight">{dayRaw}</div>
-                        {task.due_date && <div className="text-[10px] text-slate-400 font-medium mt-1">{task.due_date}</div>}
                       </td>
                       <td className="px-4 py-4 align-top">
                         <div className="text-sm font-black text-brand-700 leading-tight">{task.title}</div>
@@ -579,21 +582,34 @@ export default function WeeklyPlans() {
             <div className="p-6 space-y-6 flex-1">
               <div className="bg-brand-50 border border-brand-100 rounded-xl p-4 text-sm text-brand-800 leading-relaxed">
                 {importMode === 'ROADMAP' ? (
-                  <><strong>Roadmap Format:</strong> Paste rows from your syllabus. Ensure columns are separated by pipes (|), tabs, or at least two spaces. Expected: <code className="bg-brand-100 px-1 rounded">Day | Topic | Activities | Outcome</code></>
+                  <><strong>Roadmap Parser:</strong> Paste your weekly syllabus or roadmap directly. The system will automatically detect and structure it.</>
                 ) : (
                   <><strong>Bulk Format:</strong> Paste each task on a new line.</>
                 )}
               </div>
 
-              <textarea 
-                className="input min-h-[200px] font-mono text-sm leading-relaxed" 
-                placeholder={importMode === 'ROADMAP' 
-                  ? "Mon May 18 | Free AI APIs — Chat & Streaming | Key Activities... | Daily Outcome...\nTue May 19 | RAG with Free APIs & Vector Search | Key Activities... | Daily Outcome..." 
-                  : "Task 1\nTask 2\nTask 3"
-                } 
-                value={bulkInput} 
-                onChange={(e) => setBulkInput(e.target.value)} 
-              />
+              <div className="space-y-2">
+                <textarea 
+                  className="input min-h-[300px] font-mono text-sm leading-relaxed" 
+                  placeholder={importMode === 'ROADMAP' 
+                    ? "Day\nTopic / Theme\nKey Activities & Exercises\nDaily Outcome\n\nMon May 18\nFree AI APIs — Chat & Streaming\nFree LLM providers: Groq...\nAdd free LLM-powered streaming chat...\n\nTue May 19\n..." 
+                    : "Task 1\nTask 2\nTask 3"
+                  } 
+                  value={bulkInput} 
+                  onChange={(e) => setBulkInput(e.target.value)} 
+                />
+                {isParsing && (
+                  <div className="flex items-center gap-2 text-xs font-bold text-brand-600 animate-pulse mt-2">
+                    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+                    Parsing roadmap...
+                  </div>
+                )}
+                {parseError && (
+                  <div className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-100 p-3 rounded-lg mt-2 leading-relaxed">
+                    {parseError}
+                  </div>
+                )}
+              </div>
 
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -613,22 +629,39 @@ export default function WeeklyPlans() {
               </div>
 
               {previewTasks.length > 0 && (
-                <div className="space-y-3">
-                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
-                    <span>Parsed Preview ({previewTasks.length} entries)</span>
-                    <button type="button" onClick={() => setBulkInput('')} className="text-rose-600 hover:underline">Clear</button>
+                <div className="space-y-4">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between border-b border-slate-100 pb-2">
+                    <span>Detected Structure ({previewTasks.length} entries)</span>
+                    <button type="button" onClick={() => { setBulkInput(''); setPreviewTasks([]) }} className="text-rose-600 hover:underline">Clear All</button>
                   </div>
-                  <div className="grid gap-2 max-h-[300px] overflow-y-auto pr-2">
-                    {previewTasks.map((t, idx) => (
-                      <div key={idx} className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs flex items-start gap-3">
-                        <span className="text-brand-500 font-bold">✓</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-bold text-slate-900 truncate">{t.title}</div>
-                          {t.due_date && <div className="text-slate-500 mt-0.5">Estimated Date: {t.due_date}</div>}
-                        </div>
-                        <button onClick={() => setPreviewTasks(prev => prev.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-rose-600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-                      </div>
-                    ))}
+                  <div className="overflow-x-auto card p-0 border-slate-200">
+                    <table className="w-full text-left border-collapse text-[10px]">
+                      <thead className="bg-slate-50 border-b border-slate-100">
+                        <tr>
+                          <th className="px-3 py-2 font-black text-slate-400 uppercase">Day</th>
+                          <th className="px-3 py-2 font-black text-slate-400 uppercase">Topic</th>
+                          <th className="px-3 py-2 font-black text-slate-400 uppercase">Activities</th>
+                          <th className="px-3 py-2 font-black text-slate-400 uppercase">Outcome</th>
+                          <th className="px-2 py-2"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {previewTasks.map((t, idx) => {
+                          const parts = t.description.replace('[ROADMAP]', '').split('$$$')
+                          return (
+                            <tr key={idx} className="bg-white">
+                              <td className="px-3 py-2 font-bold text-slate-900">{parts[2] || 'N/A'}</td>
+                              <td className="px-3 py-2 text-brand-700 font-bold">{t.title}</td>
+                              <td className="px-3 py-2 text-slate-500 truncate max-w-[150px]">{parts[0]}</td>
+                              <td className="px-3 py-2 text-emerald-600 font-bold">{parts[1]}</td>
+                              <td className="px-2 py-2 text-right">
+                                <button onClick={() => setPreviewTasks(prev => prev.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-rose-600 p-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -639,7 +672,7 @@ export default function WeeklyPlans() {
               <button 
                 onClick={createTask} 
                 className="btn-primary px-8" 
-                disabled={loading || previewTasks.length === 0 || !form.batch_id}
+                disabled={loading || isParsing || previewTasks.length === 0 || !form.batch_id}
               >
                 {loading ? 'Processing...' : `Confirm & Create ${previewTasks.length} Entries`}
               </button>

@@ -151,7 +151,6 @@ export default function MyUpdates() {
                     <tr key={task.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="px-4 py-4 align-top">
                         <div className="text-sm font-bold text-slate-900 leading-tight">{dayRaw}</div>
-                        {task.due_date && <div className="text-[10px] text-slate-400 font-medium mt-1">{task.due_date}</div>}
                       </td>
                       <td className="px-4 py-4 align-top">
                         <div className="text-sm font-black text-brand-700 leading-tight">{task.title}</div>

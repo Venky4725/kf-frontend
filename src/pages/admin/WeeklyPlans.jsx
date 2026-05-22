@@ -61,6 +61,7 @@ export default function WeeklyPlans() {
   const [editingForm, setEditingForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [showRoadmapModal, setShowRoadmapModal] = useState(false)
   
   // Updated Filter States
   const [searchQuery, setSearchQuery] = useState('')
@@ -84,28 +85,33 @@ export default function WeeklyPlans() {
         due_date: form.due_date || null
       }))
     } else {
-      // Roadmap Parser (Pipe or Tab separated)
-      // Format: Day & Date | Topic | Activities | Outcome
+      // Roadmap Parser (Pipe, Tab, or Multiple Spaces separated)
+      // Expected Columns: Day | Topic | Activities | Outcome
       parsed = lines.map(line => {
-        const parts = line.split(/[|\t]/).map(p => p.trim())
+        // Skip header lines
+        if (line.toLowerCase().includes('day') && line.toLowerCase().includes('topic')) return null;
+        
+        // Handle pipe, tab, or double+ space as delimiters
+        const parts = line.split(/[|\t]|\s{2,}/).map(p => p.trim()).filter(p => p.length > 0)
+        
         if (parts.length >= 2) {
-          // Attempt to extract date from parts[0]
-          let dateStr = parts[0]
-          let extractedDate = null
+          const dayRaw = parts[0]
+          const topic = parts[1] || 'Untitled Topic'
+          const activities = parts[2] || '—'
+          const outcome = parts[3] || '—'
           
-          // Basic date extraction (e.g., "Thu Apr 2" or "Apr 2")
-          const dateMatch = dateStr.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+/i)
+          let extractedDate = null
+          const dateMatch = dayRaw.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+/i)
           if (dateMatch) {
             const d = new Date(`${dateMatch[0]} ${new Date().getFullYear()}`)
-            if (!isNaN(d.getTime())) {
-              extractedDate = d.toISOString().split('T')[0]
-            }
+            if (!isNaN(d.getTime())) extractedDate = d.toISOString().split('T')[0]
           }
 
           return {
-            title: parts[1] || 'Untitled Task',
-            description: parts.slice(2).join(' | ') || form.description || '',
-            due_date: extractedDate || form.due_date || null
+            title: topic,
+            description: `[ROADMAP]${activities}$$$${outcome}$$$${dayRaw}`,
+            due_date: extractedDate || form.due_date || null,
+            is_roadmap: true
           }
         }
         return null
@@ -179,23 +185,38 @@ export default function WeeklyPlans() {
       result = result.filter(t => t.due_date === dateFilter)
     }
 
-    // Default sorting for consistency
-    result.sort((a, b) => {
+    return result
+  }, [tasks, searchQuery, dateFilter])
+
+  const { normalTasks, roadmapTasks } = useMemo(() => {
+    const normal = []
+    const roadmap = []
+    
+    filteredTasks.forEach(task => {
+      if (task.description?.startsWith('[ROADMAP]')) {
+        roadmap.push(task)
+      } else {
+        normal.push(task)
+      }
+    })
+
+    // Sort roadmap by date
+    roadmap.sort((a, b) => {
       if (!a.due_date) return 1
       if (!b.due_date) return -1
       return new Date(a.due_date) - new Date(b.due_date)
     })
 
-    return result
-  }, [tasks, searchQuery, dateFilter])
+    return { normalTasks: normal, roadmapTasks: roadmap }
+  }, [filteredTasks])
 
-  const groupedTasks = useMemo(() => {
+  const groupedNormalTasks = useMemo(() => {
     const groups = {}
     const { today, tomorrow } = dateInfo
     const todayStr = today.toISOString().split('T')[0]
     const tomorrowStr = tomorrow.toISOString().split('T')[0]
 
-    filteredTasks.forEach(task => {
+    normalTasks.forEach(task => {
       let label = 'No Due Date'
       if (task.due_date) {
         if (task.due_date === todayStr) label = 'Today'
@@ -218,7 +239,71 @@ export default function WeeklyPlans() {
       if (b === 'No Due Date') return -1
       return new Date(a).getTime() - new Date(b).getTime()
     }).map(label => ({ label, tasks: groups[label] }))
-  }, [filteredTasks, dateInfo])
+  }, [normalTasks, dateInfo])
+
+  function RoadmapTable({ tasks }) {
+    if (tasks.length === 0) return null
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">Weekly Training Roadmaps</h3>
+          <div className="h-px w-full bg-slate-200"></div>
+          <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{tasks.length}</span>
+        </div>
+        
+        <div className="card p-0 overflow-hidden border-slate-200 shadow-sm">
+          <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-200">
+            <table className="w-full text-left border-collapse min-w-[800px]">
+              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                <tr>
+                  <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider w-32">Day</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider w-64">Topic / Theme</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Key Activities & Exercises</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider w-48">Daily Outcome</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider w-16 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {tasks.map((task) => {
+                  const parts = task.description.replace('[ROADMAP]', '').split('$$$')
+                  const activities = parts[0] || ''
+                  const outcome = parts[1] || ''
+                  const dayRaw = parts[2] || task.due_date || 'N/A'
+
+                  return (
+                    <tr key={task.id} className="hover:bg-slate-50/50 transition-colors group">
+                      <td className="px-4 py-4 align-top">
+                        <div className="text-sm font-bold text-slate-900 leading-tight">{dayRaw}</div>
+                        {task.due_date && <div className="text-[10px] text-slate-400 font-medium mt-1">{task.due_date}</div>}
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        <div className="text-sm font-black text-brand-700 leading-tight">{task.title}</div>
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        <div className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap break-words">{activities}</div>
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        <div className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 inline-block">{outcome || 'N/A'}</div>
+                      </td>
+                      <td className="px-4 py-4 align-top text-center">
+                        <button 
+                          onClick={() => deleteTask(task.id)}
+                          className="p-1.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   async function createTask(event) {
     event.preventDefault()
@@ -294,157 +379,72 @@ export default function WeeklyPlans() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-black text-slate-900">Tasks</h1>
-        <p className="text-sm text-slate-500 mt-2">Manage batch-level tasks that interns work on.</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-black text-slate-900">Tasks</h1>
+          <p className="text-sm text-slate-500 mt-2">Manage batch-level tasks and training roadmaps.</p>
+        </div>
+        <button 
+          onClick={() => { setImportMode('ROADMAP'); setIsBulk(true); setShowRoadmapModal(true) }}
+          className="btn-primary flex items-center gap-2 px-6 py-3 shadow-lg shadow-brand-200"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Paste Weekly Roadmap
+        </button>
       </div>
 
       {error && <div className="card border border-rose-200 bg-rose-50 text-rose-700">{error}</div>}
       {success && <div className="card border border-green-200 bg-green-50 text-green-700">{success}</div>}
 
-      {/* 1. Create New Task Form (TOP) */}
-      <form onSubmit={createTask} className="card space-y-6">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-          <h2 className="text-lg font-semibold text-slate-900">Create New Task</h2>
-          <div className="flex bg-slate-100 p-1 rounded-lg">
-            <button type="button" onClick={() => setIsBulk(false)} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!isBulk ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Single</button>
-            <button type="button" onClick={() => setIsBulk(true)} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${isBulk ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Bulk</button>
+      {/* 1. Create New Task Form (Single Task only for direct form) */}
+      {!isBulk && (
+        <form onSubmit={createTask} className="card space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <h2 className="text-lg font-semibold text-slate-900">Create Single Task</h2>
+            <button type="button" onClick={() => { setImportMode('SIMPLE'); setIsBulk(true); setShowRoadmapModal(true) }} className="text-xs font-bold text-brand-600 hover:text-brand-700 uppercase tracking-widest bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-100">Switch to Bulk Import</button>
           </div>
-        </div>
 
-        <div className="space-y-4">
-          {!isBulk ? (
-            <div className="space-y-4">
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <label className="label">Task Title *</label>
+              <input className="input" placeholder="e.g. Complete JavaScript Basics" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+            </div>
+            <div className="grid md:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <label className="label">Task Title *</label>
-                <input className="input" placeholder="e.g. Complete JavaScript Basics" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required={!isBulk} />
+                <label className="label">Due Date (Optional)</label>
+                <input className="input" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
               </div>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="label">Due Date (Optional)</label>
-                  <input className="input" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
-                </div>
-                <div className="space-y-1">
-                  <label className="label">Task Description (Optional)</label>
-                  <input className="input" placeholder="Additional details" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-                </div>
+              <div className="space-y-1">
+                <label className="label">Task Description (Optional)</label>
+                <input className="input" placeholder="Additional details" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
             </div>
-          ) : (
-            <div className="space-y-6">
-              {/* Import Mode Selector */}
-              <div className="flex flex-wrap gap-4">
-                <label className="flex items-center gap-2 cursor-pointer group">
-                  <input type="radio" name="importMode" checked={importMode === 'SIMPLE'} onChange={() => setImportMode('SIMPLE')} className="w-4 h-4 text-brand-600 focus:ring-brand-500" />
-                  <span className={`text-sm font-medium ${importMode === 'SIMPLE' ? 'text-slate-900' : 'text-slate-500 group-hover:text-slate-700'}`}>Simple Task List</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer group">
-                  <input type="radio" name="importMode" checked={importMode === 'ROADMAP'} onChange={() => setImportMode('ROADMAP')} className="w-4 h-4 text-brand-600 focus:ring-brand-500" />
-                  <span className={`text-sm font-medium ${importMode === 'ROADMAP' ? 'text-slate-900' : 'text-slate-500 group-hover:text-slate-700'}`}>Weekly Roadmap / Schedule</span>
-                </label>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="label">Target Batch *</label>
+                <select className="input" value={form.batch_id} onChange={(e) => setForm({ ...form, batch_id: e.target.value, assigned_to: '' })} required>
+                  <option value="">Select a batch</option>
+                  {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                </select>
               </div>
-
-              <div className="space-y-2">
-                <label className="label">
-                  {importMode === 'SIMPLE' ? 'Paste Tasks (one per line) *' : 'Paste Roadmap (Pipe | or Tab separated) *'}
-                </label>
-                <textarea 
-                  className="input min-h-[150px] font-mono text-xs leading-relaxed" 
-                  placeholder={importMode === 'SIMPLE' 
-                    ? "Task 1: Setup project\nTask 2: Install dependencies\nTask 3: Run initial tests" 
-                    : "Thu Apr 2 | Orientation + Setup | Activities for Day 1\nFri Apr 3 | Basics & Functions | Activities for Day 2"
-                  } 
-                  value={bulkInput} 
-                  onChange={(e) => setBulkInput(e.target.value)} 
-                  required={isBulk} 
-                />
-                
-                {/* Global Defaults for Bulk */}
-                <div className="grid md:grid-cols-2 gap-4 pt-2">
-                  <div className="space-y-1">
-                    <label className="label text-[10px]">Default Due Date (if not extracted)</label>
-                    <input className="input h-8 text-xs" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="label text-[10px]">Common Description (if empty)</label>
-                    <input className="input h-8 text-xs" placeholder="Shared description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-                  </div>
-                </div>
-
-                {/* Preview Section */}
-                {previewTasks.length > 0 && (
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mt-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Preview ({previewTasks.length} tasks)</div>
-                      <button type="button" onClick={() => setBulkInput('')} className="text-[10px] font-bold text-rose-600 hover:text-rose-700 uppercase tracking-wider">Clear All</button>
-                    </div>
-                    <div className="space-y-2 max-h-[250px] overflow-y-auto pr-2">
-                      {previewTasks.map((t, idx) => (
-                        <div key={idx} className="flex items-start gap-3 bg-white border border-slate-100 rounded-lg p-3 group relative hover:border-brand-300 transition-colors shadow-sm">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-brand-500 font-bold text-xs">✓</span>
-                              <span className="text-sm font-bold text-slate-800 truncate">{t.title}</span>
-                            </div>
-                            <div className="flex flex-wrap gap-2 text-[10px]">
-                              {t.due_date && (
-                                <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-100 flex items-center gap-1">
-                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                                  {t.due_date}
-                                </span>
-                              )}
-                              {t.description && (
-                                <span className="text-slate-400 truncate max-w-[200px]">{t.description}</span>
-                              )}
-                            </div>
-                          </div>
-                          <button 
-                            type="button" 
-                            onClick={() => setPreviewTasks(prev => prev.filter((_, i) => i !== idx))}
-                            className="p-1.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              <div className="space-y-1">
+                <label className="label">Assigned To</label>
+                <select className="input" value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })} disabled={!form.batch_id}>
+                  <option value="">All batch members</option>
+                  {filteredInterns.map((intern) => <option key={intern.id} value={intern.id}>{intern.name}</option>)}
+                </select>
               </div>
-            </div>
-          )}
-
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="label">Target Batch *</label>
-              <select className="input" value={form.batch_id} onChange={(e) => setForm({ ...form, batch_id: e.target.value, assigned_to: '' })} required>
-                <option value="">Select a batch</option>
-                {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="label">Assigned To</label>
-              <select className="input" value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })} disabled={!form.batch_id}>
-                <option value="">All batch members</option>
-                {filteredInterns.map((intern) => <option key={intern.id} value={intern.id}>{intern.name}</option>)}
-              </select>
             </div>
           </div>
-        </div>
 
-        <button className="btn-primary w-full py-3 text-base font-bold disabled:opacity-70 disabled:cursor-not-allowed" type="submit" disabled={loading || (isBulk && previewTasks.length === 0)}>
-          {loading ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-              Creating Tasks...
-            </span>
-          ) : (
-            isBulk ? `Create ${previewTasks.length} Tasks` : 'Create Single Task'
-          )}
-        </button>
-      </form>
+          <button className="btn-primary w-full py-3 text-base font-bold" type="submit" disabled={loading}>
+            {loading ? 'Creating...' : 'Create Single Task'}
+          </button>
+        </form>
+      )}
 
-      {/* 2. Simplified Search & Filter (NEW) */}
+      {/* 2. Simplified Search & Filter */}
       <div className="card">
         <h2 className="text-lg font-bold text-slate-900 mb-4">Search & Filter</h2>
         <div className="grid md:grid-cols-3 gap-4">
@@ -469,105 +469,184 @@ export default function WeeklyPlans() {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Select Date</label>
-            <input
-              className="input"
-              type="date"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-            />
+            <input className="input" type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
           </div>
         </div>
       </div>
 
-      {/* 3. Tasks List (BOTTOM) */}
-      <div className="space-y-8">
-        {groupedTasks.length === 0 ? (
-          <div className="card text-center py-16 bg-slate-50 border-dashed border-2 border-slate-200">
-            <div className="mx-auto w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-300">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-            </div>
-            <h3 className="text-lg font-semibold text-slate-900">No tasks found</h3>
-            <p className="text-slate-500 mt-1">Try adjusting your filters or search query.</p>
+      {/* 3. Tasks View (Separated Roadmap and Normal) */}
+      <div className="space-y-12">
+        {/* Roadmap View */}
+        <RoadmapTable tasks={roadmapTasks} />
+
+        {/* Normal Tasks View */}
+        <div className="space-y-6">
+          <div className="flex items-center gap-4">
+            <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">Normal Tasks</h3>
+            <div className="h-px w-full bg-slate-200"></div>
           </div>
-        ) : (
-          groupedTasks.map((group) => (
-            <div key={group.label} className="space-y-4">
-              <div className="flex items-center gap-4">
-                <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">{group.label}</h3>
-                <div className="h-px w-full bg-slate-200"></div>
-                <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{group.tasks.length}</span>
-              </div>
-              <div className="grid gap-4">
-                {group.tasks.map((item) => (
-                  <div key={item.id} className="card hover:shadow-md transition-shadow border-slate-200 group">
-                    {editingId === item.id ? (
-                      <div className="space-y-4">
-                        <div className="grid md:grid-cols-2 gap-4">
-                          <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Title</label>
-                            <input className="input" value={editingForm.title} onChange={(e) => setEditingForm({ ...editingForm, title: e.target.value })} />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Due Date</label>
-                            <input className="input" type="date" value={editingForm.due_date || ''} onChange={(e) => setEditingForm({ ...editingForm, due_date: e.target.value })} />
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description</label>
-                          <textarea className="input min-h-[120px]" value={editingForm.description || ''} onChange={(e) => setEditingForm({ ...editingForm, description: e.target.value })} />
-                        </div>
-                        <div className="flex justify-end gap-3 pt-2">
-                          <button className="btn-ghost" onClick={() => setEditingId(null)}>Cancel</button>
-                          <button className="btn-primary" onClick={() => saveTask(item.id)}>Save Changes</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1 space-y-3">
-                            <div>
-                              <h3 className="text-lg font-bold text-slate-900 leading-tight break-words">{item.title}</h3>
-                              <div className="flex flex-wrap gap-2 mt-2">
-                                <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium text-slate-600">
-                                  <svg className="text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                                  {batchName(item.batch_id)}
-                                </div>
-                                <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium text-slate-600">
-                                  <svg className="text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                                  {item.assigned_to_name || 'All batch members'}
-                                </div>
-                                {item.due_date && (
-                                  <div className={`flex items-center gap-1.5 px-2 py-1 border rounded text-xs font-medium ${
-                                    new Date(item.due_date) < dateInfo.today && item.status !== 'COMPLETED'
-                                      ? 'bg-rose-50 border-rose-100 text-rose-700'
-                                      : 'bg-amber-50 border-amber-100 text-amber-700'
-                                  }`}>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                                    Due: {item.due_date}
-                                  </div>
-                                )}
-                              </div>
+          
+          {groupedNormalTasks.length === 0 ? (
+            <div className="card text-center py-12 bg-slate-50 border-dashed border-2 border-slate-200">
+              <p className="text-slate-500">No normal tasks found.</p>
+            </div>
+          ) : (
+            groupedNormalTasks.map((group) => (
+              <div key={group.label} className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">{group.label}</h3>
+                  <div className="h-px w-full bg-slate-100"></div>
+                  <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{group.tasks.length}</span>
+                </div>
+                <div className="grid gap-4">
+                  {group.tasks.map((item) => (
+                    <div key={item.id} className="card hover:shadow-md transition-shadow border-slate-200 group">
+                      {editingId === item.id ? (
+                        <div className="space-y-4">
+                          <div className="grid md:grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Title</label>
+                              <input className="input" value={editingForm.title} onChange={(e) => setEditingForm({ ...editingForm, title: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Due Date</label>
+                              <input className="input" type="date" value={editingForm.due_date || ''} onChange={(e) => setEditingForm({ ...editingForm, due_date: e.target.value })} />
                             </div>
                           </div>
-                          <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors" title="Edit Task" onClick={() => { setEditingId(item.id); setEditingForm({ ...item, description: item.description || '', due_date: item.due_date || '', status: item.status || 'PENDING' }) }}>
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                            </button>
-                            <button className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Delete Task" onClick={() => deleteTask(item.id)}>
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                            </button>
+                          <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description</label>
+                            <textarea className="input min-h-[120px]" value={editingForm.description || ''} onChange={(e) => setEditingForm({ ...editingForm, description: e.target.value })} />
+                          </div>
+                          <div className="flex justify-end gap-3 pt-2">
+                            <button className="btn-ghost" onClick={() => setEditingId(null)}>Cancel</button>
+                            <button className="btn-primary" onClick={() => saveTask(item.id)}>Save Changes</button>
                           </div>
                         </div>
-                        <div className="pt-3 border-t border-slate-100"><TaskDescription text={item.description} /></div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 space-y-3">
+                              <div>
+                                <h3 className="text-lg font-bold text-slate-900 leading-tight break-words">{item.title}</h3>
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium text-slate-600">
+                                    <svg className="text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                                    {batchName(item.batch_id)}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium text-slate-600">
+                                    <svg className="text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                                    {item.assigned_to_name || 'All batch members'}
+                                  </div>
+                                  {item.due_date && (
+                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 border border-amber-100 rounded text-xs font-medium text-amber-700">
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                                      Due: {item.due_date}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors" title="Edit Task" onClick={() => { setEditingId(item.id); setEditingForm({ ...item, description: item.description || '', due_date: item.due_date || '', status: item.status || 'PENDING' }) }}>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                              </button>
+                              <button className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Delete Task" onClick={() => deleteTask(item.id)}>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="pt-3 border-t border-slate-100"><TaskDescription text={item.description} /></div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))
-        )}
+            ))
+          )}
+        </div>
       </div>
+
+      {/* Roadmap Modal */}
+      {showRoadmapModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl border-none p-0 flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+              <h2 className="text-xl font-black text-slate-900">{importMode === 'ROADMAP' ? 'Paste Weekly Roadmap' : 'Bulk Import Tasks'}</h2>
+              <button onClick={() => { setShowRoadmapModal(false); setIsBulk(false); setBulkInput('') }} className="text-slate-400 hover:text-slate-600 p-2"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+            </div>
+            
+            <div className="p-6 space-y-6 flex-1">
+              <div className="bg-brand-50 border border-brand-100 rounded-xl p-4 text-sm text-brand-800 leading-relaxed">
+                {importMode === 'ROADMAP' ? (
+                  <><strong>Roadmap Format:</strong> Paste rows from your syllabus. Ensure columns are separated by pipes (|), tabs, or at least two spaces. Expected: <code className="bg-brand-100 px-1 rounded">Day | Topic | Activities | Outcome</code></>
+                ) : (
+                  <><strong>Bulk Format:</strong> Paste each task on a new line.</>
+                )}
+              </div>
+
+              <textarea 
+                className="input min-h-[200px] font-mono text-sm leading-relaxed" 
+                placeholder={importMode === 'ROADMAP' 
+                  ? "Mon May 18 | Free AI APIs — Chat & Streaming | Key Activities... | Daily Outcome...\nTue May 19 | RAG with Free APIs & Vector Search | Key Activities... | Daily Outcome..." 
+                  : "Task 1\nTask 2\nTask 3"
+                } 
+                value={bulkInput} 
+                onChange={(e) => setBulkInput(e.target.value)} 
+              />
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="label">Target Batch *</label>
+                  <select className="input" value={form.batch_id} onChange={(e) => setForm({ ...form, batch_id: e.target.value, assigned_to: '' })} required>
+                    <option value="">Select a batch</option>
+                    {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="label">Assign To</label>
+                  <select className="input" value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })} disabled={!form.batch_id}>
+                    <option value="">All batch members</option>
+                    {filteredInterns.map((intern) => <option key={intern.id} value={intern.id}>{intern.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {previewTasks.length > 0 && (
+                <div className="space-y-3">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                    <span>Parsed Preview ({previewTasks.length} entries)</span>
+                    <button type="button" onClick={() => setBulkInput('')} className="text-rose-600 hover:underline">Clear</button>
+                  </div>
+                  <div className="grid gap-2 max-h-[300px] overflow-y-auto pr-2">
+                    {previewTasks.map((t, idx) => (
+                      <div key={idx} className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs flex items-start gap-3">
+                        <span className="text-brand-500 font-bold">✓</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-slate-900 truncate">{t.title}</div>
+                          {t.due_date && <div className="text-slate-500 mt-0.5">Estimated Date: {t.due_date}</div>}
+                        </div>
+                        <button onClick={() => setPreviewTasks(prev => prev.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-rose-600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 sticky bottom-0 z-10">
+              <button onClick={() => { setShowRoadmapModal(false); setIsBulk(false); setBulkInput('') }} className="btn-ghost">Cancel</button>
+              <button 
+                onClick={createTask} 
+                className="btn-primary px-8" 
+                disabled={loading || previewTasks.length === 0 || !form.batch_id}
+              >
+                {loading ? 'Processing...' : `Confirm & Create ${previewTasks.length} Entries`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

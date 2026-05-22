@@ -121,8 +121,8 @@ export default function WeeklyPlans() {
           batch_id: form.batch_id,
           due_date: form.due_date || null,
           assigned_to: form.assigned_to || null,
-          priority: form.priority,
-          status: form.status
+          priority: 'LOW',
+          status: 'PENDING'
         }))
         const res = await api.post('/tasks/bulk', { tasks: tasksPayload })
         setBulkInput(''); setForm(EMPTY_FORM)
@@ -237,18 +237,22 @@ export default function WeeklyPlans() {
                 {filteredInterns.map((intern) => <option key={intern.id} value={intern.id}>{intern.name}</option>)}
               </select>
             </div>
-            <div className="space-y-1">
-              <label className="label">Priority</label>
-              <select className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-                {PRIORITY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="label">Initial Status</label>
-              <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                {STATUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-              </select>
-            </div>
+            {!isBulk && (
+              <>
+                <div className="space-y-1">
+                  <label className="label">Priority</label>
+                  <select className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+                    {PRIORITY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="label">Initial Status</label>
+                  <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                    {STATUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

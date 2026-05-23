@@ -291,11 +291,17 @@ export default function TLManagement() {
   // Filter out inactive profiles
   const activeTLs = tls.filter(tl => tl.is_active)
 
-  function batchName(batchId) {
-    if (!batchId) return 'Unassigned'
+  function batchName(item) {
+    // Check if the profile has multiple batches (returned by some APIs)
+    if (item.batches && Array.isArray(item.batches) && item.batches.length > 0) {
+      return item.batches.map(b => b.name).join(', ')
+    }
+    
+    // Fallback to single batch_id
+    if (!item.batch_id) return 'Unassigned'
     
     // Normalize ID for comparison (handle both string and number)
-    const normalizedId = String(batchId)
+    const normalizedId = String(item.batch_id)
     const batch = batches.find((b) => String(b.id) === normalizedId)
     
     return batch?.name || 'Unassigned'
@@ -422,7 +428,7 @@ export default function TLManagement() {
                       {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                     </select>
                   ) : (
-                    batchName(item.batch_id)
+                    batchName(item)
                   )}
                 </td>
                 <td className="td">

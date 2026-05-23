@@ -81,7 +81,62 @@ export default function WeeklyPlans() {
   }, [searchQuery])
 
   // Parsing Logic
-  // ... (rest of states)
+  useEffect(() => {
+    if (!bulkInput.trim()) {
+      setPreviewTasks([])
+      setParseError('')
+      return
+    }
+
+    if (importMode === 'SIMPLE') {
+      const lines = bulkInput.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+      const parsed = lines.map(line => ({
+        title: line,
+        description: form.description || '',
+        due_date: form.due_date || null
+      }))
+      setPreviewTasks(parsed)
+      setParseError('')
+    } else {
+      const timer = setTimeout(handleParseRoadmap, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [bulkInput, importMode])
+
+  async function handleParseRoadmap() {
+    if (!bulkInput.trim() || importMode !== 'ROADMAP') return
+    
+    setIsParsing(true)
+    setParseError('')
+    try {
+      const res = await api.post('/tasks/parse-roadmap', { raw_text: bulkInput })
+      if (res.data && Array.isArray(res.data.entries)) {
+        const parsed = res.data.entries.map(e => ({
+          title: String(e.topic || e.title || 'Untitled Topic'),
+          description: `[ROADMAP]${e.activities || '—'}$$$${e.outcome || '—'}$$$${e.day || 'N/A'}`,
+          due_date: e.due_date || null,
+          is_roadmap: true
+        }))
+        setPreviewTasks(parsed)
+        if (parsed.length === 0) {
+          setParseError('Could not detect roadmap structure. Please ensure each day contains:\nDay\nTopic\nActivities\nOutcome')
+        }
+      } else {
+        setParseError('Unexpected response format from parser.')
+      }
+    } catch (err) {
+      console.error('Syllabus parsing failed:', err)
+      setParseError('Could not detect roadmap structure. Please ensure each day contains:\nDay\nTopic\nActivities\nOutcome')
+      setPreviewTasks([])
+    } finally {
+      setIsParsing(false)
+    }
+  }
+
+  const filteredInterns = React.useMemo(() => {
+    if (!form.batch_id) return []
+    return interns.filter(intern => String(intern.batch_id) === String(form.batch_id))
+  }, [interns, form.batch_id])
 
   // Load static data once
   async function loadStaticData() {
@@ -124,27 +179,23 @@ export default function WeeklyPlans() {
     loadTasks()
   }, [selectedBatch])
   
-  // ... (rest of logic)
+  useEffect(() => {
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, loadTasks)
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, loadTasks)
+    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, loadTasks)
+    return () => { cleanupBatch(); cleanupTL(); cleanupIntern() }
+  }, [])
 
-  const filteredTasks = useMemo(() => {
-    let result = [...tasks]
-
-    // 1. Search filter (Intern Name or Task Title)
-    if (debouncedSearch) {
-      const q = debouncedSearch.toLowerCase()
-      result = result.filter(t => 
-        t.title.toLowerCase().includes(q) || 
-        (t.assigned_to_name && t.assigned_to_name.toLowerCase().includes(q))
-      )
-    }
-
-    // 2. Date Filter
-    if (dateFilter) {
-      result = result.filter(t => t.due_date === dateFilter)
-    }
-
-    return result
-  }, [tasks, debouncedSearch, dateFilter])
+  // Date Logic for Grouping
+  const dateInfo = useMemo(() => {
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    
+    return { today: now, tomorrow }
+  }, [])
 
   const { normalTasks, roadmapTasks } = useMemo(() => {
     const normal = []

@@ -29,7 +29,20 @@ export default function AttendanceDashboard() {
   const [staticLoaded, setStaticLoaded] = React.useState(false)
   const [staticLoading, setStaticLoading] = React.useState(false)
 
-  // ... (rest of states)
+  // Filter states
+  const [dateRange, setDateRange] = React.useState(() => {
+    const end = new Date()
+    const start = subDays(end, 30)
+    return {
+      start: format(start, 'yyyy-MM-dd'),
+      end: format(end, 'yyyy-MM-dd')
+    }
+  })
+  const [batchFilter, setBatchFilter] = React.useState('')
+  const [internFilter, setInternFilter] = React.useState('')
+  const [statusFilter, setStatusFilter] = React.useState('')
+  
+  const isAdmin = user?.role === 'ADMIN'
 
   // Load static data once
   const loadStaticData = React.useCallback(async () => {
@@ -93,13 +106,16 @@ export default function AttendanceDashboard() {
   // Listen for batch/TL/intern updates from other pages
   React.useEffect(() => {
     const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, () => {
-      loadData() // Reload all data
+      loadStaticData()
+      loadAttendanceData()
     })
     const cleanupTL = onEvent(EVENTS.TL_UPDATED, () => {
-      loadData() // Reload all data
+      loadStaticData()
+      loadAttendanceData()
     })
     const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, () => {
-      loadData() // Reload all data
+      loadStaticData()
+      loadAttendanceData()
     })
     
     return () => {

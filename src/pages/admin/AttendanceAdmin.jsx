@@ -9,9 +9,11 @@ export default function AttendanceAdmin() {
   const [attendance, setAttendance] = useState([])
   const [batches, setBatches] = useState([])
   const [interns, setInterns] = useState([])
+  const [staticLoaded, setStaticLoaded] = useState(false)
   
   // UI states
   const [loading, setLoading] = useState(false)
+  const [staticLoading, setStaticLoading] = useState(false)
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
   const [markingAttendance, setMarkingAttendance] = useState({})

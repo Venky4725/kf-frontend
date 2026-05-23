@@ -118,7 +118,7 @@ export default function EvaluationsPage() {
     })
     
     return sorted
-  }, [evaluations, searchQuery, weekFilter, internFilter, scoreMinFilter, scoreMaxFilter, sortBy, internMap, batchFilter])
+  }, [evaluations, debouncedSearch, weekFilter, internFilter, scoreMinFilter, scoreMaxFilter, sortBy, internMap, batchFilter])
 
   async function load() {
     if (!user?.id) return

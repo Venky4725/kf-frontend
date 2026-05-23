@@ -22,7 +22,21 @@ export default function UserArchive() {
   }, [search])
 
   async function load() {
-    // ...
+    try {
+      setLoading(true)
+      const [profilesRes, batchesRes] = await Promise.all([
+        api.get('/profiles', { params: { is_active: false, limit: 500 } }),
+        api.get('/batches'),
+      ])
+      
+      setProfiles(profilesRes.data || [])
+      setBatches(batchesRes.data || [])
+      setError('')
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Failed to load archive')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])

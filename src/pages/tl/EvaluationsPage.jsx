@@ -31,8 +31,17 @@ export default function EvaluationsPage() {
   const [downloadLoading, setDownloadLoading] = useState(false)
   const [selectedInterns, setSelectedInterns] = useState([])
   const [selectedWeeks, setSelectedWeeks] = useState([])
+  const [csvInternSearch, setCsvInternSearch] = useState('')
 
   const internMap = useMemo(() => Object.fromEntries(interns.map((intern) => [intern.id, intern])), [interns])
+  const batchMap = useMemo(() => Object.fromEntries(batches.map((batch) => [batch.id, batch])), [batches])
+
+  // Get intern label with batch name
+  const getInternLabel = (intern) => {
+    if (!intern) return 'Unknown'
+    const batchName = batchMap[intern.batch_id]?.name
+    return batchName ? `${intern.name} (${batchName})` : intern.name
+  }
 
   // Filter interns by selected batch for dropdown
   const filteredInternsForDropdown = useMemo(() => {
@@ -279,9 +288,21 @@ This action cannot be undone.`)) {
       const params = new URLSearchParams()
       
       // Add filters
+      if (batchFilter) {
+        params.append('batch_id', batchFilter)
+      }
+
+      // If specific interns selected, use them. 
+      // Otherwise, if a batch is filtered, we only want interns from that batch.
       if (selectedInterns.length > 0) {
         params.append('intern_ids', selectedInterns.join(','))
+      } else if (batchFilter) {
+        const batchInternIds = filteredInternsForDropdown.map(i => i.id)
+        if (batchInternIds.length > 0) {
+          params.append('intern_ids', batchInternIds.join(','))
+        }
       }
+
       if (selectedWeeks.length > 0) {
         params.append('week_numbers', selectedWeeks.join(','))
       }
@@ -298,8 +319,9 @@ This action cannot be undone.`)) {
       link.href = url
       
       // Generate filename with timestamp
+      const batchName = batchFilter ? batchMap[batchFilter]?.name.replace(/\s+/g, '_') : 'all_batches'
       const timestamp = new Date().toISOString().split('T')[0]
-      link.setAttribute('download', `evaluations_${timestamp}.csv`)
+      link.setAttribute('download', `evaluations_${batchName}_${timestamp}.csv`)
       
       document.body.appendChild(link)
       link.click()
@@ -319,11 +341,14 @@ This action cannot be undone.`)) {
     }
   }
 
-  // Get unique weeks from evaluations
+  // Get unique weeks from evaluations - respect batch filter
   const availableWeeks = useMemo(() => {
-    const weeks = new Set(evaluations.map(e => e.week_number))
+    const relevantEvaluations = batchFilter 
+      ? evaluations.filter(e => String(internMap[e.intern_id]?.batch_id) === String(batchFilter))
+      : evaluations
+    const weeks = new Set(relevantEvaluations.map(e => e.week_number))
     return Array.from(weeks).sort((a, b) => a - b)
-  }, [evaluations])
+  }, [evaluations, batchFilter, internMap])
 
   return (
     <div className="space-y-6">
@@ -369,7 +394,7 @@ This action cannot be undone.`)) {
             >
               <option value="">Choose an intern...</option>
               {filteredInternsForDropdown.map((intern) => (
-                <option key={intern.id} value={intern.id}>{intern.name}</option>
+                <option key={intern.id} value={intern.id}>{getInternLabel(intern)}</option>
               ))}
             </select>
           </div>
@@ -474,7 +499,7 @@ This action cannot be undone.`)) {
             <select className="input" value={internFilter} onChange={(e) => setInternFilter(e.target.value)} disabled={!batchFilter}>
               <option value="">All Interns</option>
               {filteredInternsForDropdown.map((intern) => (
-                <option key={intern.id} value={intern.id}>{intern.name}</option>
+                <option key={intern.id} value={intern.id}>{getInternLabel(intern)}</option>
               ))}
             </select>
           </div>
@@ -532,14 +557,23 @@ This action cannot be undone.`)) {
           </div>
         </div>
         
-        {/* Active Filters Summary */}
-        {hasActiveFilters && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-xs text-blue-700">
-              <span className="font-semibold">🔍 Active Filters:</span> Showing {filteredAndSortedEvaluations.length} of {evaluations.length} evaluations
-            </p>
-          </div>
-        )}
+        {/* Batch Summary and Active Filters Summary */}
+        <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+          {batchFilter && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex-1 w-full">
+              <p className="text-sm text-emerald-700">
+                <span className="font-bold">Showing:</span> Batch: <span className="font-semibold">{batchMap[batchFilter]?.name}</span> | Interns: <span className="font-semibold">{filteredInternsForDropdown.length}</span>
+              </p>
+            </div>
+          )}
+          {hasActiveFilters && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex-1 w-full">
+              <p className="text-xs text-blue-700">
+                <span className="font-semibold">🔍 Active Filters:</span> Showing {filteredAndSortedEvaluations.length} of {evaluations.length} evaluations
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 3. Evaluations Table - Results appear immediately after filters */}
@@ -587,10 +621,10 @@ This action cannot be undone.`)) {
             <tbody className="divide-y divide-slate-100">
               {filteredAndSortedEvaluations.map((item) => (
               <tr key={item.id}>
-                <td className="td">{internMap[item.intern_id]?.name || item.intern_id}</td>
+                <td className="td font-medium text-slate-900">{getInternLabel(internMap[item.intern_id])}</td>
                 <td className="td">{item.week_number}</td>
                 <td className="td font-semibold">{item.score}</td>
-                <td className="td">{item.feedback || '—'}</td>
+                <td className="td italic text-slate-600">{item.feedback || '—'}</td>
                 {(user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD') && (
                   <td className="td space-x-2">
                     <button
@@ -621,27 +655,43 @@ This action cannot be undone.`)) {
           <p className="text-sm text-slate-500 mt-1">Download filtered evaluations as a CSV file</p>
         </div>
         
-        <div className="grid md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Select Interns (Optional)</label>
-            <select 
-              multiple 
-              className="input min-h-[100px]" 
-              value={selectedInterns}
-              onChange={(e) => setSelectedInterns(Array.from(e.target.selectedOptions, option => option.value))}
-            >
-              {interns.map((intern) => (
-                <option key={intern.id} value={intern.id}>{intern.name}</option>
-              ))}
-            </select>
-            <p className="text-xs text-slate-500 mt-1">Hold Ctrl/Cmd to select multiple</p>
+        <div className="grid md:grid-cols-3 gap-6">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700">
+              Select Interns (Optional)
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search intern name..."
+                className="input text-xs mb-2 py-1.5"
+                value={csvInternSearch}
+                onChange={(e) => setCsvInternSearch(e.target.value)}
+              />
+              <select 
+                id="intern-export-select"
+                multiple 
+                className="input min-h-[150px] text-sm" 
+                value={selectedInterns}
+                onChange={(e) => setSelectedInterns(Array.from(e.target.selectedOptions, option => option.value))}
+              >
+                {filteredInternsForDropdown
+                  .filter(intern => getInternLabel(intern).toLowerCase().includes(csvInternSearch.toLowerCase()))
+                  .map((intern) => (
+                    <option key={intern.id} value={intern.id}>{getInternLabel(intern)}</option>
+                  ))}
+              </select>
+            </div>
+            <p className="text-[10px] text-slate-400">Hold Ctrl/Cmd to select multiple. Showing {filteredInternsForDropdown.length} interns.</p>
           </div>
           
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Select Weeks (Optional)</label>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700">
+              Select Weeks (Optional)
+            </label>
             <select 
               multiple 
-              className="input min-h-[100px]" 
+              className="input min-h-[150px] text-sm" 
               value={selectedWeeks}
               onChange={(e) => setSelectedWeeks(Array.from(e.target.selectedOptions, option => option.value))}
             >
@@ -649,29 +699,37 @@ This action cannot be undone.`)) {
                 <option key={week} value={week}>Week {week}</option>
               ))}
             </select>
-            <p className="text-xs text-slate-500 mt-1">Hold Ctrl/Cmd to select multiple</p>
+            <p className="text-[10px] text-slate-400">Hold Ctrl/Cmd to select multiple</p>
           </div>
           
-          <div className="flex items-end">
+          <div className="flex flex-col justify-end space-y-3">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <h3 className="text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wider">Export Summary</h3>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-600">Batch: <span className="font-medium text-slate-900">{batchMap[batchFilter]?.name || 'All Batches'}</span></p>
+                <p className="text-xs text-slate-600">Interns: <span className="font-medium text-slate-900">{selectedInterns.length || 'All Filtered'}</span></p>
+                <p className="text-xs text-slate-600">Weeks: <span className="font-medium text-slate-900">{selectedWeeks.length || 'All Weeks'}</span></p>
+              </div>
+            </div>
             <button
               onClick={downloadCSV}
               disabled={downloadLoading || filteredAndSortedEvaluations.length === 0}
-              className="btn-primary w-full disabled:bg-slate-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="btn-primary w-full disabled:bg-slate-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 py-3"
             >
               {downloadLoading ? (
                 <>
-                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Downloading...
+                  Processing...
                 </>
               ) : (
                 <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  Download CSV
+                  Export to CSV
                 </>
               )}
             </button>

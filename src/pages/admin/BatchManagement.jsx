@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 
 import api from '../../lib/api'
 import { formatTechLeads } from '../../utils/formatters'
@@ -18,10 +18,10 @@ export default function BatchManagement() {
 
   // Create TL lookup map for efficient access
   const tlMap = useMemo(() => {
-    return Object.fromEntries(tls.map(tl => [tl.id, tl]))
+    return Object.fromEntries((tls || []).map(tl => [tl.id, tl]))
   }, [tls])
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const [batchList, tlProfiles] = await Promise.all([
@@ -53,17 +53,19 @@ export default function BatchManagement() {
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => { load() }, [])
-  
-  // Listen for TL updates from other pages
-  useEffect(() => {
-    const cleanup = onEvent(EVENTS.TL_UPDATED, () => {
-      load() // Reload both batches and TLs
-    })
-    return cleanup
   }, [])
+
+  useEffect(() => { load() }, [load])
+  
+  // Listen for updates from other pages
+  useEffect(() => {
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, load)
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, load)
+    return () => {
+      cleanupTL()
+      cleanupBatch()
+    }
+  }, [load])
 
   async function createBatch(event) {
     event.preventDefault()

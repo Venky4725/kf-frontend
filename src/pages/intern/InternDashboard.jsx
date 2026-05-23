@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
+import { onEvent, EVENTS } from '../../utils/events'
 
 export default function InternDashboard() {
   const { user } = useAuth()
@@ -14,65 +15,90 @@ export default function InternDashboard() {
   const [countsLoading, setCountsLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(true)
 
-  useEffect(() => {
-    const controller = new AbortController()
+  const loadDashboard = useCallback(async (signal) => {
+    const userId = user?.id
+    if (!userId) return
     
-    async function loadDashboard() {
-      const userId = user?.id
-      if (!userId) return
+    console.time('🚀 Intern Dashboard Total Load')
+    setLoading(true)
+    setCountsLoading(true)
+    
+    try {
+      const statsPromises = [
+        // 1. Specialized Counts for Intern (user_id scoped by backend)
+        api.get('/dashboard/stats/counts', { signal })
+          .then(res => { setCounts(res.data) })
+          .catch(err => console.error('Intern Counts error:', err))
+          .finally(() => setCountsLoading(false)),
+
+        // 2. Main data lists
+        api.get('/submissions', { params: { user_id: userId, limit: 5 }, signal }),
+        api.get('/evaluations', { params: { intern_id: userId, limit: 5 }, signal }),
+      ]
       
-      console.time('🚀 Intern Dashboard Total Load')
-      setLoading(true)
-      
-      try {
-        const statsPromises = [
-          // 1. Specialized Counts for Intern (user_id scoped by backend)
-          api.get('/dashboard/stats/counts', { signal: controller.signal })
-            .then(res => { setCounts(res.data); setCountsLoading(false) })
-            .catch(err => console.error('Intern Counts error:', err)),
-
-          // 2. Main data lists
-          api.get('/submissions', { params: { user_id: userId, limit: 5 }, signal: controller.signal }),
-          api.get('/evaluations', { params: { intern_id: userId, limit: 5 }, signal: controller.signal }),
-        ]
-        
-        if (user.batch_id) {
-          statsPromises.push(api.get('/tasks', { params: { batch_id: user.batch_id, limit: 5 }, signal: controller.signal }))
-        } else {
-          statsPromises.push(Promise.resolve({ data: [] }))
-        }
-
-        const results = await Promise.allSettled(statsPromises)
-        
-        // Process data results
-        const submissionsRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
-        const evaluationsRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
-        const tasksRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
-
-        setData({
-          tasks: (tasksRes.data || []).filter(t => !t.description?.startsWith('[ROADMAP]')),
-          submissions: submissionsRes.data || [],
-          evaluations: evaluationsRes.data || [],
-        })
-        
-        setDataLoading(false)
-        setError('')
-      } catch (err) {
-        if (err.name !== 'CanceledError') {
-          console.error('Failed to load intern dashboard:', err)
-          setError(err.response?.data?.detail || 'Failed to load your dashboard.')
-        }
-      } finally {
-        setLoading(false)
-        console.timeEnd('🚀 Intern Dashboard Total Load')
+      if (user.batch_id) {
+        statsPromises.push(api.get('/tasks', { params: { batch_id: user.batch_id, limit: 5 }, signal }))
+      } else {
+        statsPromises.push(Promise.resolve({ data: [] }))
       }
-    }
 
-    loadDashboard()
-    return () => controller.abort()
+      const results = await Promise.allSettled(statsPromises)
+      
+      // Process data results (indices 1, 2, 3)
+      const submissionsRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
+      const evaluationsRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
+      const tasksRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
+
+      setData({
+        tasks: (tasksRes.data || []).filter(t => !t.description?.startsWith('[ROADMAP]')),
+        submissions: submissionsRes.data || [],
+        evaluations: evaluationsRes.data || [],
+      })
+      
+      setDataLoading(false)
+      setError('')
+    } catch (err) {
+      if (err?.name !== 'CanceledError') {
+        console.error('Failed to load intern dashboard:', err)
+        setError(err.response?.data?.detail || 'Failed to load your dashboard.')
+      }
+    } finally {
+      setLoading(false)
+      console.timeEnd('🚀 Intern Dashboard Total Load')
+    }
   }, [user?.id, user?.batch_id])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    loadDashboard(controller.signal)
+    return () => controller.abort()
+  }, [loadDashboard])
+
+  // Listen for updates from other parts of the app
+  useEffect(() => {
+    const refresh = () => loadDashboard()
+    
+    const cleanups = [
+      onEvent(EVENTS.TASK_UPDATED, refresh),
+      onEvent(EVENTS.INTERN_UPDATED, refresh),
+      onEvent(EVENTS.EVALUATION_UPDATED, refresh),
+      onEvent(EVENTS.NOTIFICATION_UPDATED, refresh),
+    ]
+    
+    return () => cleanups.forEach(fn => fn())
+  }, [loadDashboard])
+
   const latestEvaluation = useMemo(() => data.evaluations[0] || null, [data.evaluations])
+
+  // Display counts derived from stats endpoint or fallback to local list length
+  const displayCounts = useMemo(() => {
+    return {
+      tasks: Math.max(data.tasks.length, counts?.tasks || 0),
+      submissions: Math.max(data.submissions.length, counts?.submissions || 0),
+      evaluations: Math.max(data.evaluations.length, counts?.evaluations || 0),
+      unread_notifications: counts?.unread_notifications || 0
+    }
+  }, [counts, data])
 
   if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700 m-6">{error}</div>
 
@@ -87,10 +113,10 @@ export default function InternDashboard() {
       </section>
 
       <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Kpi label="Assigned Tasks" value={counts?.tasks} loading={countsLoading} />
-        <Kpi label="Submitted Updates" value={counts?.submissions} loading={countsLoading} />
-        <Kpi label="Evaluations" value={counts?.evaluations} loading={countsLoading} />
-        <Kpi label="Unread Alerts" value={counts?.unread_notifications} loading={countsLoading} />
+        <Kpi label="Assigned Tasks" value={displayCounts.tasks} loading={countsLoading} />
+        <Kpi label="Submitted Updates" value={displayCounts.submissions} loading={countsLoading} />
+        <Kpi label="Evaluations" value={displayCounts.evaluations} loading={countsLoading} />
+        <Kpi label="Unread Alerts" value={displayCounts.unread_notifications} loading={countsLoading} />
       </section>
 
       <section className="grid lg:grid-cols-2 gap-6">

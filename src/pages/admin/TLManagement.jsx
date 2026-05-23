@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 
 import api from '../../lib/api'
 import { validateEmail, validateName, validateTechStack, validateUUID } from '../../utils/validation'
@@ -15,6 +15,9 @@ export default function TLManagement() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [fieldErrors, setFieldErrors] = useState({})
+  
+  // Track last request time to prevent stale re-fetches from overwriting fresh state
+  const lastUpdateRef = useRef(0)
 
   // Handle multi-select for batches
   function handleBatchSelect(e, isEditing = false) {
@@ -27,48 +30,62 @@ export default function TLManagement() {
     }
   }
 
-  async function load() {
+  const load = useCallback(async (signal) => {
+    const requestId = Date.now()
     try {
-      const { data } = await api.get('/profiles', { params: { role: 'TECHNICAL_LEAD', limit: 500 } })
-      setTls(data)
-      setError('')
-    } catch (err) {
-      console.error('❌ Failed to load technical leads:', err)
+      const { data } = await api.get('/profiles', { params: { role: 'TECHNICAL_LEAD', limit: 500 }, signal })
       
-      // Detect CORS/Network failures
-      if (!err.response) {
-        if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
-          setError('❌ Backend connection failed. Please check if the server is running and CORS is configured.')
-        } else if (err.message?.includes('CORS')) {
-          setError('❌ CORS error: Backend is blocking requests from this origin.')
-        } else {
-          setError('❌ Network error: Unable to reach the backend server.')
-        }
-      } else {
+      // Only update if this is the latest request and no manual update has happened recently
+      if (requestId >= lastUpdateRef.current) {
+        setTls(data || [])
+        setError('')
+      }
+    } catch (err) {
+      if (err.name !== 'CanceledError') {
+        console.error('❌ Failed to load technical leads:', err)
         setError(err.response?.data?.detail || 'Failed to load technical lead profiles.')
       }
     }
-  }
-
-  async function loadBatches() {
-    try {
-      const { data } = await api.get('/batches', { params: { limit: 500 } })
-      setBatches(data)
-    } catch (err) {
-      console.error('❌ Failed to load batches:', err)
-    }
-  }
-
-  useEffect(() => { load() }, [])
-  useEffect(() => { loadBatches() }, [])
-  
-  // Listen for batch updates from other pages
-  useEffect(() => {
-    const cleanup = onEvent(EVENTS.BATCH_UPDATED, () => {
-      loadBatches()
-    })
-    return cleanup
   }, [])
+
+  const loadBatches = useCallback(async (signal) => {
+    const requestId = Date.now()
+    try {
+      const { data } = await api.get('/batches', { params: { limit: 500 }, signal })
+      
+      if (requestId >= lastUpdateRef.current) {
+        setBatches(data || [])
+      }
+    } catch (err) {
+      if (err.name !== 'CanceledError') {
+        console.error('❌ Failed to load batches:', err)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    load(controller.signal)
+    loadBatches(controller.signal)
+    return () => controller.abort()
+  }, [load, loadBatches])
+  
+  // Listen for updates from other pages
+  useEffect(() => {
+    const refresh = () => {
+      // Add a small delay to avoid race conditions with backend index/cache updates
+      setTimeout(() => {
+        load()
+        loadBatches()
+      }, 800)
+    }
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, refresh)
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, refresh)
+    return () => {
+      cleanupBatch()
+      cleanupTL()
+    }
+  }, [load, loadBatches])
 
   async function createProfile(event) {
     event.preventDefault()
@@ -120,35 +137,28 @@ export default function TLManagement() {
         batch_ids: form.batch_ids && form.batch_ids.length > 0 ? form.batch_ids : []
       }
       
-      await api.post('/profiles', payload)
+      const { data: newProfile } = await api.post('/profiles', payload)
       
-      // Success - clear form and reload
+      // Update last update timestamp to ignore stale re-fetches
+      lastUpdateRef.current = Date.now()
+      
+      // OPTIMISTIC UPDATE: Update local state immediately with returned data
+      setTls(prev => [newProfile, ...prev])
+      
+      // Success - clear form
       setForm(EMPTY_FORM)
       setError('')
       setFieldErrors({})
       setSuccess('✅ Technical lead created successfully!')
       setTimeout(() => setSuccess(''), 3000)
       
-      // Immediate refetch to update UI - refresh both TLs and batches
-      await Promise.all([load(), loadBatches()])
-      
       // Emit events to notify other pages
       emitTLUpdate()
       emitBatchUpdate()
     } catch (err) {
       console.error('❌ Failed to create technical lead:', err)
-      
-      // Extract error message from backend
       const errorMsg = err.response?.data?.detail || 'Failed to create technical lead profile.'
-      
-      // Handle different error types
-      if (err.response?.status === 409) {
-        setError(`❌ ${errorMsg}`)
-      } else if (err.response?.status === 400) {
-        setError(`⚠️ ${errorMsg}`)
-      } else {
-        setError(`❌ ${errorMsg}`)
-      }
+      setError(`❌ ${errorMsg}`)
     }
   }
 
@@ -206,36 +216,27 @@ export default function TLManagement() {
         batch_ids: editingForm.batch_ids && editingForm.batch_ids.length > 0 ? editingForm.batch_ids : [],
       }
       
-      await api.put(`/profiles/${id}`, payload)
+      const { data: updatedProfile } = await api.put(`/profiles/${id}`, payload)
       
-      // Success - clear editing state and reload
+      // Update last update timestamp to ignore stale re-fetches
+      lastUpdateRef.current = Date.now()
+      
+      // OPTIMISTIC UPDATE: Update local state immediately with returned data
+      setTls(prev => prev.map(tl => tl.id === id ? updatedProfile : tl))
+      
+      // Success - clear editing state
       setEditingId(null)
       setEditingForm(EMPTY_FORM)
-      setError('')
-      setFieldErrors({})
       setSuccess('✅ Technical lead updated successfully!')
       setTimeout(() => setSuccess(''), 3000)
-      
-      // Immediate refetch to update UI - refresh both TLs and batches
-      await Promise.all([load(), loadBatches()])
       
       // Emit events to notify other pages
       emitTLUpdate()
       emitBatchUpdate()
     } catch (err) {
       console.error('❌ Failed to update technical lead:', err)
-      
-      // Extract error message from backend
       const errorMsg = err.response?.data?.detail || 'Failed to update profile.'
-      
-      // Handle different error types
-      if (err.response?.status === 409) {
-        setError(`❌ ${errorMsg}`)
-      } else if (err.response?.status === 400) {
-        setError(`⚠️ ${errorMsg}`)
-      } else {
-        setError(`❌ ${errorMsg}`)
-      }
+      setError(`❌ ${errorMsg}`)
     }
   }
 
@@ -251,8 +252,9 @@ export default function TLManagement() {
       setSuccess('✅ Technical lead deactivated successfully!')
       setTimeout(() => setSuccess(''), 3000)
       
-      // Immediate refetch to update UI - refresh both TLs and batches
-      await Promise.all([load(), loadBatches()])
+      // Immediate refetch to update UI
+      load()
+      loadBatches()
       
       // Emit events to notify other pages
       emitTLUpdate()
@@ -276,8 +278,9 @@ export default function TLManagement() {
       setSuccess('✅ Technical lead activated successfully!')
       setTimeout(() => setSuccess(''), 3000)
       
-      // Immediate refetch to update UI - refresh both TLs and batches
-      await Promise.all([load(), loadBatches()])
+      // Immediate refetch to update UI
+      load()
+      loadBatches()
       
       // Emit events to notify other pages
       emitTLUpdate()
@@ -289,24 +292,36 @@ export default function TLManagement() {
     }
   }
   
-  // Filter out inactive profiles
-  const activeTLs = tls.filter(tl => tl.is_active)
+  // Normalize TL profiles to strictly use `batches` arrays
+  const normalizedTLs = useMemo(() => {
+    return tls.map(tl => {
+      let tlBatches = []
+      
+      // 1. Backend provided expanded batches
+      if (tl.batches && Array.isArray(tl.batches)) {
+        tlBatches = tl.batches
+      } 
+      // 2. Backend provided batch_ids
+      else if (tl.batch_ids && Array.isArray(tl.batch_ids)) {
+        tlBatches = tl.batch_ids
+          .map(id => batches.find(b => String(b.id) === String(id)))
+          .filter(Boolean)
+      } 
+      // 3. Derive from batches collection (if backend reverse relation is pending)
+      else {
+        tlBatches = batches.filter(b => 
+          b.first_tech_lead_id === tl.id || 
+          b.second_tech_lead_id === tl.id || 
+          b.third_tech_lead_id === tl.id
+        )
+      }
+      
+      return { ...tl, batches: tlBatches }
+    })
+  }, [tls, batches])
 
-  function batchName(item) {
-    // Check if the profile has multiple batches (returned by some APIs)
-    if (item.batches && Array.isArray(item.batches) && item.batches.length > 0) {
-      return item.batches.map(b => b.name).join(', ')
-    }
-    
-    // Fallback to single batch_id
-    if (!item.batch_id) return 'Unassigned'
-    
-    // Normalize ID for comparison (handle both string and number)
-    const normalizedId = String(item.batch_id)
-    const batch = batches.find((b) => String(b.id) === normalizedId)
-    
-    return batch?.name || 'Unassigned'
-  }
+  // Filter out inactive profiles
+  const activeTLs = normalizedTLs.filter(tl => tl.is_active)
 
   return (
     <div className="space-y-6">
@@ -446,7 +461,7 @@ export default function TLManagement() {
                     </div>
                   ) : (
                     <div className="max-w-[200px] break-words">
-                      {batchName(item)}
+                      {item.batches?.length ? item.batches.map(b => b.name).join(' / ') : 'Unassigned'}
                     </div>
                   )}
                 </td>
@@ -478,13 +493,13 @@ export default function TLManagement() {
                         onClick={() => {
                           setEditingId(item.id)
                           
-                          // Extract batch IDs for multi-select
+                          // Extract batch IDs for multi-select - HANDLES ALL BACKEND VARIATIONS
                           let batchIds = []
-                          if (item.batches && Array.isArray(item.batches)) {
+                          if (item.batches && Array.isArray(item.batches) && item.batches.length > 0) {
                             batchIds = item.batches.map(b => b.id)
-                          } else if (item.batch_id) {
-                            batchIds = [item.batch_id]
-                          }
+                          } else if (item.batch_ids && Array.isArray(item.batch_ids) && item.batch_ids.length > 0) {
+                            batchIds = item.batch_ids
+                          } 
                           
                           setEditingForm({ 
                             name: item.name, 

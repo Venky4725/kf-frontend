@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
+import { onEvent, EVENTS } from '../../utils/events'
 
 export default function TLDashboard() {
   const { user } = useAuth()
@@ -14,63 +15,79 @@ export default function TLDashboard() {
   const [countsLoading, setCountsLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(true)
 
+  const loadDashboard = useCallback(async (signal) => {
+    const userId = user?.id
+    if (!userId) return
+
+    console.time('🚀 TL Dashboard Total Load')
+    setLoading(true)
+    setCountsLoading(true)
+    
+    try {
+      const statsPromises = [
+        // 1. Specialized Counts for TL (scoped by backend automatically)
+        api.get('/dashboard/stats/counts', { signal })
+          .then(res => { setCounts(res.data) })
+          .catch(err => console.error('TL Counts error:', err))
+          .finally(() => setCountsLoading(false)),
+
+        // 2. Main lists
+        api.get('/batches', { params: { limit: 500 }, signal }),
+        api.get('/profiles', { params: { role: 'INTERN', limit: 500 }, signal }),
+        api.get('/submissions', { params: { limit: 5 }, signal }),
+        api.get('/evaluations', { params: { reviewed_by: userId, limit: 5 }, signal }),
+      ]
+
+      const results = await Promise.allSettled(statsPromises)
+      
+      // Process data results (indices 1, 2, 3)
+      const batchesRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
+      const internsRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
+      const submissionsRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
+
+      // Filter submissions for TL batches if not done by backend
+      const tlBatchIds = new Set((batchesRes.data || []).map((b) => b.id))
+      const tlInternIds = new Set((internsRes.data || []).filter(i => tlBatchIds.has(i.batch_id)).map(i => i.id))
+      const tlSubmissions = (submissionsRes.data || []).filter(s => tlInternIds.has(s.user_id))
+
+      setSummary({
+        batches: batchesRes.data || [],
+        recentSubmissions: tlSubmissions.slice(0, 5),
+      })
+      
+      setDataLoading(false)
+      setError('')
+    } catch (err) {
+      if (err?.name !== 'CanceledError') {
+        console.error('Failed to load TL dashboard:', err)
+        setError(err.response?.data?.detail || 'Failed to load technical lead dashboard.')
+      }
+    } finally {
+      setLoading(false)
+      console.timeEnd('🚀 TL Dashboard Total Load')
+    }
+  }, [user?.id])
+
   useEffect(() => {
     const controller = new AbortController()
-    
-    async function loadDashboard() {
-      const userId = user?.id
-      if (!userId) return
-
-      console.time('🚀 TL Dashboard Total Load')
-      setLoading(true)
-      
-      try {
-        const statsPromises = [
-          // 1. Specialized Counts for TL (scoped by backend automatically)
-          api.get('/dashboard/stats/counts', { signal: controller.signal })
-            .then(res => { setCounts(res.data); setCountsLoading(false) })
-            .catch(err => console.error('TL Counts error:', err)),
-
-          // 2. Main lists
-          api.get('/batches', { params: { limit: 500 }, signal: controller.signal }),
-          api.get('/profiles', { params: { role: 'INTERN', limit: 500 }, signal: controller.signal }),
-          api.get('/submissions', { params: { limit: 5 }, signal: controller.signal }),
-          api.get('/evaluations', { params: { reviewed_by: userId, limit: 5 }, signal: controller.signal }),
-        ]
-
-        const results = await Promise.allSettled(statsPromises)
-        
-        // Process data results
-        const batchesRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
-        const internsRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
-        const submissionsRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
-
-        // Filter submissions for TL batches if not done by backend
-        const tlBatchIds = new Set((batchesRes.data || []).map((b) => b.id))
-        const tlInternIds = new Set((internsRes.data || []).filter(i => tlBatchIds.has(i.batch_id)).map(i => i.id))
-        const tlSubmissions = (submissionsRes.data || []).filter(s => tlInternIds.has(s.user_id))
-
-        setSummary({
-          batches: batchesRes.data || [],
-          recentSubmissions: tlSubmissions.slice(0, 5),
-        })
-        
-        setDataLoading(false)
-        setError('')
-      } catch (err) {
-        if (err.name !== 'CanceledError') {
-          console.error('Failed to load TL dashboard:', err)
-          setError(err.response?.data?.detail || 'Failed to load technical lead dashboard.')
-        }
-      } finally {
-        setLoading(false)
-        console.timeEnd('🚀 TL Dashboard Total Load')
-      }
-    }
-
-    loadDashboard()
+    loadDashboard(controller.signal)
     return () => controller.abort()
-  }, [user?.id])
+  }, [loadDashboard])
+
+  // Listen for updates from other pages
+  useEffect(() => {
+    const refresh = () => loadDashboard()
+    
+    const cleanups = [
+      onEvent(EVENTS.BATCH_UPDATED, refresh),
+      onEvent(EVENTS.TL_UPDATED, refresh),
+      onEvent(EVENTS.INTERN_UPDATED, refresh),
+      onEvent(EVENTS.TASK_UPDATED, refresh),
+      onEvent(EVENTS.EVALUATION_UPDATED, refresh),
+    ]
+    
+    return () => cleanups.forEach(fn => fn())
+  }, [loadDashboard])
 
   if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700 m-6">{error}</div>
 

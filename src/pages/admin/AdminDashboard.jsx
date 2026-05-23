@@ -1,5 +1,6 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import api from '../../lib/api'
+import { onEvent, EVENTS } from '../../utils/events'
 
 export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
@@ -11,62 +12,81 @@ export default function AdminDashboard() {
   
   const [countsLoading, setCountsLoading] = useState(true)
 
+  const loadDashboard = useCallback(async (signal) => {
+    console.time('🚀 Admin Dashboard Total Load')
+    setLoading(true)
+    setCountsLoading(true)
+    
+    try {
+      // 1. Parallel Stats & Main Data
+      const statsPromises = [
+        // Index 0: Counts (Interns, TLs, Batches, etc.)
+        api.get('/dashboard/stats/counts', { signal })
+          .then(res => { setCounts(res.data) })
+          .catch(err => console.error('Counts load error:', err))
+          .finally(() => setCountsLoading(false)),
+          
+        // Index 1: Profiles
+        api.get('/profiles', { params: { limit: 500 }, signal }),
+        // Index 2: Batches
+        api.get('/batches', { params: { limit: 500 }, signal }),
+        // Index 3: Submissions
+        api.get('/submissions', { params: { limit: 5 }, signal }),
+        // Index 4: Evaluations
+        api.get('/evaluations', { params: { limit: 5 }, signal }),
+      ]
+
+      const results = await Promise.allSettled(statsPromises)
+      
+      // Process recent activity results
+      const profilesRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
+      const batchesRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
+      const submissionsRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
+      const evaluationsRes = results[4].status === 'fulfilled' ? results[4].value : { data: [] }
+
+      const allProfiles = profilesRes.data || []
+      const profileMap = Object.fromEntries(allProfiles.map((p) => [p.id, p]))
+      const batchMap = Object.fromEntries((batchesRes.data || []).map((b) => [b.id, b]))
+
+      setRecentData({
+        submissions: submissionsRes.data || [],
+        evaluations: evaluationsRes.data || [],
+        profileMap,
+        batchMap
+      })
+
+      setError('')
+    } catch (err) {
+      if (err.name !== 'CanceledError') {
+        console.error('❌ Admin Dashboard Load Error:', err)
+        setError(err.response?.data?.detail || 'Failed to load admin dashboard.')
+      }
+    } finally {
+      setLoading(false)
+      console.timeEnd('🚀 Admin Dashboard Total Load')
+    }
+  }, [])
+
   useEffect(() => {
     const controller = new AbortController()
-    
-    async function loadDashboard() {
-      console.time('🚀 Admin Dashboard Total Load')
-      setLoading(true)
-      
-      try {
-        // 1. Parallel Stats & Main Data
-        const statsPromises = [
-          // Counts (Interns, TLs, Batches, etc.)
-          api.get('/dashboard/stats/counts', { signal: controller.signal })
-            .then(res => { setCounts(res.data); setCountsLoading(false) })
-            .catch(err => console.error('Counts load error:', err)),
-            
-          // Recent Activity (Submissions, etc.)
-          api.get('/profiles', { params: { limit: 500 }, signal: controller.signal }),
-          api.get('/batches', { params: { limit: 500 }, signal: controller.signal }),
-          api.get('/submissions', { params: { limit: 5 }, signal: controller.signal }),
-          api.get('/evaluations', { params: { limit: 5 }, signal: controller.signal }),
-        ]
-
-        const results = await Promise.allSettled(statsPromises)
-        
-        // Process recent activity results (indices: 1=profiles, 2=batches, 3=submissions, 4=evaluations)
-        const profilesRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
-        const batchesRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
-        const submissionsRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
-        const evaluationsRes = results[4].status === 'fulfilled' ? results[4].value : { data: [] }
-
-        const allProfiles = profilesRes.data || []
-        const profileMap = Object.fromEntries(allProfiles.map((p) => [p.id, p]))
-        const batchMap = Object.fromEntries((batchesRes.data || []).map((b) => [b.id, b]))
-
-        setRecentData({
-          submissions: submissionsRes.data || [],
-          evaluations: evaluationsRes.data || [],
-          profileMap,
-          batchMap
-        })
-
-        setError('')
-      } catch (err) {
-        if (err.name !== 'CanceledError') {
-          console.error('❌ Admin Dashboard Load Error:', err)
-          setError(err.response?.data?.detail || 'Failed to load admin dashboard.')
-        }
-      } finally {
-        setLoading(false)
-        console.timeEnd('🚀 Admin Dashboard Total Load')
-      }
-    }
-
-    loadDashboard()
+    loadDashboard(controller.signal)
     return () => controller.abort()
-  }, [])
+  }, [loadDashboard])
+
+  // Listen for updates from other pages
+  useEffect(() => {
+    const refresh = () => loadDashboard()
+    
+    const cleanups = [
+      onEvent(EVENTS.BATCH_UPDATED, refresh),
+      onEvent(EVENTS.TL_UPDATED, refresh),
+      onEvent(EVENTS.INTERN_UPDATED, refresh),
+      onEvent(EVENTS.TASK_UPDATED, refresh),
+      onEvent(EVENTS.EVALUATION_UPDATED, refresh),
+    ]
+    
+    return () => cleanups.forEach(fn => fn())
+  }, [loadDashboard])
 
   const internsByBatch = useMemo(() => {
     if (!recentData.profileMap || !recentData.batchMap) return {}
@@ -77,6 +97,25 @@ export default function AdminDashboard() {
       return acc
     }, {})
   }, [recentData.profileMap, recentData.batchMap])
+
+  // Derive counts from local data to ensure consistency with widgets
+  // Falls back to backend global counts if local data is likely truncated
+  const displayCounts = useMemo(() => {
+    const localProfiles = Object.values(recentData.profileMap || {})
+    const localInterns = localProfiles.filter(p => p.role === 'INTERN' && p.is_active !== false).length
+    const localTLs = localProfiles.filter(p => p.role === 'TECHNICAL_LEAD' && p.is_active !== false).length
+    const localBatchesCount = Object.keys(recentData.batchMap || {}).length
+
+    return {
+      interns: Math.max(localInterns, counts?.interns || 0),
+      tls: Math.max(localTLs, counts?.tls || 0),
+      batches: Math.max(localBatchesCount, counts?.batches || 0),
+      tasks: counts?.tasks || 0,
+      submissions: counts?.submissions || 0,
+      evaluations: counts?.evaluations || 0,
+      notifications: counts?.notifications || 0,
+    }
+  }, [counts, recentData.profileMap, recentData.batchMap])
 
   if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700 m-6">{error}</div>
 
@@ -99,13 +138,13 @@ export default function AdminDashboard() {
 
       {/* KPI Section */}
       <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-        <Kpi label="Interns" value={counts?.interns} loading={countsLoading} />
-        <Kpi label="TLs" value={counts?.tls} loading={countsLoading} />
-        <Kpi label="Batches" value={counts?.batches} loading={countsLoading} />
-        <Kpi label="Tasks" value={counts?.tasks} loading={countsLoading} />
-        <Kpi label="Submissions" value={counts?.submissions} loading={countsLoading} />
-        <Kpi label="Evaluations" value={counts?.evaluations} loading={countsLoading} />
-        <Kpi label="Notifications" value={counts?.notifications} loading={countsLoading} />
+        <Kpi label="Interns" value={displayCounts.interns} loading={countsLoading} />
+        <Kpi label="TLs" value={displayCounts.tls} loading={countsLoading} />
+        <Kpi label="Batches" value={displayCounts.batches} loading={countsLoading} />
+        <Kpi label="Tasks" value={displayCounts.tasks} loading={countsLoading} />
+        <Kpi label="Submissions" value={displayCounts.submissions} loading={countsLoading} />
+        <Kpi label="Evaluations" value={displayCounts.evaluations} loading={countsLoading} />
+        <Kpi label="Notifications" value={displayCounts.notifications} loading={countsLoading} />
       </section>
 
       {/* Analytics Grid */}

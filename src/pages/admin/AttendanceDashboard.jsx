@@ -132,6 +132,12 @@ export default function AttendanceDashboard() {
     return Object.fromEntries((batches || []).map(batch => [batch.id, batch]))
   }, [batches])
 
+  // Filter interns by selected batch for dropdown
+  const filteredInternsForDropdown = React.useMemo(() => {
+    if (!batchFilter) return interns
+    return interns.filter(intern => String(intern.batch_id) === String(batchFilter))
+  }, [interns, batchFilter])
+
   // PERMANENT CENTRALIZED FILTERING ARCHITECTURE
   // This is the SINGLE SOURCE OF TRUTH for all filtered data
   const filteredAttendanceData = React.useMemo(() => {

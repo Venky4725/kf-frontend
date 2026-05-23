@@ -1,9 +1,10 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider, useAuth } from './hooks/AuthContext'
 import AppLayout from './layouts/AppLayout'
+import api from './lib/api'
 
 // Loading component
 const PageLoader = () => (

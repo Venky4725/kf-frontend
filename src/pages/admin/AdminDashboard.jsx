@@ -7,13 +7,9 @@ export default function AdminDashboard() {
   
   // Split state for independent loading/rendering
   const [counts, setCounts] = useState(null)
-  const [attendanceStats, setAttendanceStats] = useState(null)
-  const [evaluationStats, setEvaluationStats] = useState(null)
   const [recentData, setRecentData] = useState({ submissions: [], evaluations: [], profileMap: {}, batchMap: {} })
   
   const [countsLoading, setCountsLoading] = useState(true)
-  const [attendanceLoading, setAttendanceLoading] = useState(true)
-  const [evalLoading, setEvalLoading] = useState(true)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -30,16 +26,6 @@ export default function AdminDashboard() {
             .then(res => { setCounts(res.data); setCountsLoading(false) })
             .catch(err => console.error('Counts load error:', err)),
             
-          // Attendance Summary
-          api.get('/dashboard/stats/attendance', { signal: controller.signal })
-            .then(res => { setAttendanceStats(res.data); setAttendanceLoading(false) })
-            .catch(err => console.error('Attendance load error:', err)),
-            
-          // Evaluations Summary
-          api.get('/dashboard/stats/evaluations', { signal: controller.signal })
-            .then(res => { setEvaluationStats(res.data); setEvalLoading(false) })
-            .catch(err => console.error('Evaluations load error:', err)),
-
           // Recent Activity (Submissions, etc.)
           api.get('/profiles', { params: { limit: 500 }, signal: controller.signal }),
           api.get('/batches', { params: { limit: 500 }, signal: controller.signal }),
@@ -49,11 +35,11 @@ export default function AdminDashboard() {
 
         const results = await Promise.allSettled(statsPromises)
         
-        // Process recent activity results
-        const profilesRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
-        const batchesRes = results[4].status === 'fulfilled' ? results[4].value : { data: [] }
-        const submissionsRes = results[5].status === 'fulfilled' ? results[5].value : { data: [] }
-        const evaluationsRes = results[6].status === 'fulfilled' ? results[6].value : { data: [] }
+        // Process recent activity results (indices: 1=profiles, 2=batches, 3=submissions, 4=evaluations)
+        const profilesRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
+        const batchesRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
+        const submissionsRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
+        const evaluationsRes = results[4].status === 'fulfilled' ? results[4].value : { data: [] }
 
         const allProfiles = profilesRes.data || []
         const profileMap = Object.fromEntries(allProfiles.map((p) => [p.id, p]))
@@ -124,51 +110,6 @@ export default function AdminDashboard() {
 
       {/* Analytics Grid */}
       <section className="grid lg:grid-cols-2 gap-6">
-        {/* Attendance Widget */}
-        <div className="card">
-          <h2 className="text-lg font-semibold mb-4 flex items-center justify-between">
-            Attendance Summary
-            {attendanceLoading && <span className="text-xs animate-pulse text-slate-400 font-normal">Updating...</span>}
-          </h2>
-          {attendanceLoading ? <Skeleton h="120px" /> : (
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div className="p-3 rounded-lg bg-emerald-50">
-                <div className="text-xs text-emerald-600 font-bold uppercase tracking-wider">Present</div>
-                <div className="text-2xl font-black text-emerald-700">{attendanceStats?.present || 0}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-amber-50">
-                <div className="text-xs text-amber-600 font-bold uppercase tracking-wider">Late</div>
-                <div className="text-2xl font-black text-amber-700">{attendanceStats?.late || 0}</div>
-              </div>
-              <div className="p-3 rounded-lg bg-rose-50">
-                <div className="text-xs text-rose-600 font-bold uppercase tracking-wider">Absent</div>
-                <div className="text-2xl font-black text-rose-700">{attendanceStats?.absent || 0}</div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Evaluation Summary */}
-        <div className="card">
-          <h2 className="text-lg font-semibold mb-4 flex items-center justify-between">
-            Evaluation Metrics
-            {evalLoading && <span className="text-xs animate-pulse text-slate-400 font-normal">Updating...</span>}
-          </h2>
-          {evalLoading ? <Skeleton h="120px" /> : (
-            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
-              <div>
-                <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">Avg Score</div>
-                <div className="text-4xl font-black text-brand-700">{evaluationStats?.average_score?.toFixed(1) || '0.0'}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">This Week</div>
-                <div className="text-2xl font-black text-slate-900">{evaluationStats?.this_week_count || 0}</div>
-                <div className="text-[10px] text-slate-400">Total Evaluations</div>
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Intern Distribution */}
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">Intern Distribution by Batch</h2>
@@ -293,4 +234,3 @@ function QuickLink({ href, title, subtitle, color }) {
 function Skeleton({ h }) {
   return <div className="bg-slate-100 animate-pulse rounded-xl w-full" style={{ height: h }}></div>
 }
-

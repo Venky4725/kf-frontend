@@ -4,7 +4,7 @@ import api from '../../lib/api'
 import { validateEmail, validateName, validateTechStack, validateUUID } from '../../utils/validation'
 import { emitTLUpdate, emitBatchUpdate, onEvent, EVENTS } from '../../utils/events'
 
-const EMPTY_FORM = { name: '', email: '', tech_stack: '', batch_id: '' }
+const EMPTY_FORM = { name: '', email: '', tech_stack: '', batch_ids: [] }
 
 export default function TLManagement() {
   const [tls, setTls] = useState([])
@@ -15,6 +15,17 @@ export default function TLManagement() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [fieldErrors, setFieldErrors] = useState({})
+
+  // Handle multi-select for batches
+  function handleBatchSelect(e, isEditing = false) {
+    const selectedOptions = Array.from(e.target.selectedOptions, option => option.value)
+    
+    if (isEditing) {
+      setEditingForm({ ...editingForm, batch_ids: selectedOptions })
+    } else {
+      setForm({ ...form, batch_ids: selectedOptions })
+    }
+  }
 
   async function load() {
     try {
@@ -82,11 +93,6 @@ export default function TLManagement() {
       errors.tech_stack = techStackValidation.error
     }
     
-    const batchIdValidation = validateUUID(form.batch_id, 'Batch')
-    if (!batchIdValidation.valid) {
-      errors.batch_id = batchIdValidation.error
-    }
-    
     // If there are validation errors, show them and stop
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors)
@@ -111,7 +117,7 @@ export default function TLManagement() {
         email: normalizedEmail,
         tech_stack: form.tech_stack.trim() || null,
         role: 'TECHNICAL_LEAD',
-        batch_id: form.batch_id || null
+        batch_ids: form.batch_ids && form.batch_ids.length > 0 ? form.batch_ids : []
       }
       
       await api.post('/profiles', payload)
@@ -169,11 +175,6 @@ export default function TLManagement() {
       errors.tech_stack = techStackValidation.error
     }
     
-    const batchIdValidation = validateUUID(editingForm.batch_id, 'Batch')
-    if (!batchIdValidation.valid) {
-      errors.batch_id = batchIdValidation.error
-    }
-    
     // If there are validation errors, show them and stop
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors)
@@ -202,7 +203,7 @@ export default function TLManagement() {
         name: editingForm.name.trim(),
         email: normalizedEmail,
         tech_stack: editingForm.tech_stack?.trim() || null,
-        batch_id: editingForm.batch_id || null,
+        batch_ids: editingForm.batch_ids && editingForm.batch_ids.length > 0 ? editingForm.batch_ids : [],
       }
       
       await api.put(`/profiles/${id}`, payload)
@@ -368,20 +369,16 @@ export default function TLManagement() {
           
           <div>
             <select 
-              className={`input ${fieldErrors.batch_id ? 'border-red-500' : ''}`}
-              value={form.batch_id} 
-              onChange={(e) => { 
-                setForm({ ...form, batch_id: e.target.value }); 
-                setError(''); 
-                setFieldErrors({ ...fieldErrors, batch_id: null });
-              }}
+              className={`input min-h-[100px] ${fieldErrors.batch_ids ? 'border-red-500' : ''}`}
+              multiple
+              value={form.batch_ids} 
+              onChange={(e) => handleBatchSelect(e, false)}
             >
-              <option value="">Assign to batch (optional)...</option>
               {batches.map((b) => (
                 <option key={b.id} value={b.id}>{b.name} ({b.tech_stack})</option>
               ))}
             </select>
-            {fieldErrors.batch_id && <p className="text-xs text-red-600 mt-1">{fieldErrors.batch_id}</p>}
+            <p className="text-xs text-slate-500 mt-1">Hold Ctrl/Cmd to select multiple batches</p>
           </div>
         </div>
         
@@ -423,8 +420,12 @@ export default function TLManagement() {
                 </td>
                 <td className="td">
                   {editingId === item.id ? (
-                    <select className="input" value={editingForm.batch_id || ''} onChange={(e) => { setEditingForm({ ...editingForm, batch_id: e.target.value }); setError(''); }}>
-                      <option value="">Unassigned</option>
+                    <select 
+                      className="input min-h-[80px]" 
+                      multiple
+                      value={editingForm.batch_ids || []} 
+                      onChange={(e) => handleBatchSelect(e, true)}
+                    >
                       {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
                     </select>
                   ) : (
@@ -458,7 +459,21 @@ export default function TLManagement() {
                         className="px-4 py-2 text-sm font-medium text-cyan-700 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 rounded-md transition-all duration-200"
                         onClick={() => {
                           setEditingId(item.id)
-                          setEditingForm({ name: item.name, email: item.email, tech_stack: item.tech_stack || '', batch_id: item.batch_id || '' })
+                          
+                          // Extract batch IDs for multi-select
+                          let batchIds = []
+                          if (item.batches && Array.isArray(item.batches)) {
+                            batchIds = item.batches.map(b => b.id)
+                          } else if (item.batch_id) {
+                            batchIds = [item.batch_id]
+                          }
+                          
+                          setEditingForm({ 
+                            name: item.name, 
+                            email: item.email, 
+                            tech_stack: item.tech_stack || '', 
+                            batch_ids: batchIds 
+                          })
                           setError('')
                           setFieldErrors({})
                         }}

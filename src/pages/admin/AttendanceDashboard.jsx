@@ -46,7 +46,8 @@ export default function AttendanceDashboard() {
 
   // Load static data once
   const loadStaticData = React.useCallback(async () => {
-    if (!user?.id || staticLoaded) return
+    const userId = user?.id
+    if (!userId || staticLoaded) return
     
     setStaticLoading(true)
     try {
@@ -63,7 +64,7 @@ export default function AttendanceDashboard() {
     } finally {
       setStaticLoading(false)
     }
-  }, [user, staticLoaded])
+  }, [user?.id, staticLoaded])
 
   // Load dynamic attendance data
   const loadAttendanceData = React.useCallback(async () => {
@@ -104,13 +105,13 @@ export default function AttendanceDashboard() {
   }, [loadAttendanceData])
   
   // Listen for batch/TL/intern updates from other pages
-  React.useEffect(() => {
-    const handleUpdates = () => {
-      // Direct calls to load functions (they check user internally)
-      loadStaticData()
-      loadAttendanceData()
-    }
+  const handleUpdates = React.useCallback(() => {
+    // Direct calls to load functions (they check user internally)
+    loadStaticData()
+    loadAttendanceData()
+  }, [loadStaticData, loadAttendanceData])
 
+  React.useEffect(() => {
     const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, handleUpdates)
     const cleanupTL = onEvent(EVENTS.TL_UPDATED, handleUpdates)
     const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, handleUpdates)
@@ -120,7 +121,7 @@ export default function AttendanceDashboard() {
       cleanupTL()
       cleanupIntern()
     }
-  }, [loadStaticData, loadAttendanceData])
+  }, [handleUpdates])
 
   // Create lookup maps for efficient data access
   const internMap = React.useMemo(() => {

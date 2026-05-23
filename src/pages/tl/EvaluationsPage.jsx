@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
@@ -120,8 +120,10 @@ export default function EvaluationsPage() {
     return sorted
   }, [evaluations, debouncedSearch, weekFilter, internFilter, scoreMinFilter, scoreMaxFilter, sortBy, internMap, batchFilter])
 
-  async function load() {
-    if (!user?.id) return
+  // Load data with proper filtering and role-based logic
+  const load = useCallback(async () => {
+    const userId = user?.id
+    if (!userId) return
 
     try {
       const [profiles, batchesRes, evaluationList] = await Promise.all([
@@ -132,11 +134,13 @@ export default function EvaluationsPage() {
       ])
 
       // Set batches for all roles
-      setBatches(batchesRes.data || [])
+      const allBatches = batchesRes.data || []
+      setBatches(allBatches)
 
       if (user?.role === 'TECHNICAL_LEAD') {
-        const allowedBatchIds = new Set((batchesRes.data || []).map((batch) => batch.id))
-        const filteredInterns = (profiles.data || []).filter((intern) => allowedBatchIds.has(intern.batch_id))
+        const allowedBatchIds = new Set(allBatches.map((batch) => batch.id))
+        const allInterns = profiles.data || []
+        const filteredInterns = allInterns.filter((intern) => allowedBatchIds.has(intern.batch_id))
         setInterns(filteredInterns)
         
         // Filter evaluations to only show those for interns in assigned batches
@@ -157,34 +161,27 @@ export default function EvaluationsPage() {
       setBatches([])
       setEvaluations([])
     }
-  }
+  }, [user?.id, user?.role])
 
   useEffect(() => {
-    if (user?.id) {
-      load()
-    }
-  }, [user?.id, user?.role])
+    load()
+  }, [load])
   
   // Listen for batch/TL/intern updates from other pages
   useEffect(() => {
-    if (!user?.id) return
+    const userId = user?.id
+    if (!userId) return
     
-    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, () => {
-      load() // Reload all data
-    })
-    const cleanupTL = onEvent(EVENTS.TL_UPDATED, () => {
-      load() // Reload all data
-    })
-    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, () => {
-      load() // Reload all data
-    })
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, load)
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, load)
+    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, load)
     
     return () => {
       cleanupBatch()
       cleanupTL()
       cleanupIntern()
     }
-  }, [user?.id])
+  }, [user?.id, load])
 
   async function createEvaluation(event) {
     event.preventDefault()

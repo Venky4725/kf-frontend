@@ -100,6 +100,7 @@ export default function WeeklyPlans() {
   }, [staticLoaded])
 
   const loadTasks = useCallback(async () => {
+    if (!user?.id) return
     try {
       const params = { limit: 500 }
       if (selectedBatch) params.batch_id = selectedBatch
@@ -111,7 +112,7 @@ export default function WeeklyPlans() {
       setError(getErrorMessage(err.response?.data?.detail || 'Failed to load tasks.'))
       setTasks([])
     }
-  }, [selectedBatch])
+  }, [user?.id, selectedBatch])
 
   useEffect(() => {
     loadStaticData()
@@ -122,11 +123,12 @@ export default function WeeklyPlans() {
   }, [loadTasks])
   
   useEffect(() => {
+    if (!user?.id) return
     const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, loadTasks)
     const cleanupTL = onEvent(EVENTS.TL_UPDATED, loadTasks)
     const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, loadTasks)
     return () => { cleanupBatch(); cleanupTL(); cleanupIntern() }
-  }, [loadTasks])
+  }, [user?.id, loadTasks])
 
   // Roadmap Parsing
   const handleParseRoadmap = useCallback(async () => {

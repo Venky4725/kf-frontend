@@ -134,16 +134,20 @@ export default function WeeklyPlans() {
     try {
       const params = { limit: 500 }
       if (selectedBatch) params.batch_id = selectedBatch
-      const [taskList, batchList, userList, internList] = await Promise.all([
+      const [taskList, batchList, profileList] = await Promise.all([
         api.get('/tasks', { params }),
         api.get('/batches', { params: { limit: 500 } }),
         api.get('/profiles', { params: { limit: 500 } }),
-        api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
       ])
+      
+      const allProfiles = profileList.data || []
       setTasks(taskList.data || [])
       setBatches(batchList.data || [])
-      setAllUsers(userList.data || [])
-      setInterns(internList.data || [])
+      setAllUsers(allProfiles)
+      
+      // Filter interns from all profiles on frontend
+      setInterns(allProfiles.filter(p => p.role === 'INTERN'))
+      
       setError('')
     } catch (err) {
       console.error('❌ Failed to load tasks:', err)

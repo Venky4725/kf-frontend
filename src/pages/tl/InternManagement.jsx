@@ -29,7 +29,16 @@ export default function InternManagement() {
   const [sortBy, setSortBy] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
 
-  async function load() {
+  async function loadBatches() {
+    try {
+      const { data } = await api.get('/batches', { params: { limit: 500 } })
+      setBatches(data)
+    } catch (err) {
+      console.error('❌ Failed to load batches:', err)
+    }
+  }
+
+  const load = async () => {
     if (!user?.id) return
     
     setLoading(true)
@@ -44,16 +53,11 @@ export default function InternManagement() {
       if (sortBy) params.sort_by = sortBy
       if (sortOrder) params.sort_order = sortOrder
 
-      const [batchList, profiles] = await Promise.all([
-        api.get('/batches', { params: { limit: 500 } }),
-        api.get('/profiles', { params }),
-      ])
-      
-      setBatches(batchList.data || [])
+      const { data: profilesData } = await api.get('/profiles', { params })
       
       // Filter to only show interns in Tech Lead's batches
-      const allowedBatchIds = new Set(batchList.data.map((batch) => batch.id))
-      const filteredInterns = profiles.data.filter((intern) => allowedBatchIds.has(intern.batch_id))
+      const allowedBatchIds = new Set(batches.map((batch) => batch.id))
+      const filteredInterns = (profilesData || []).filter((intern) => allowedBatchIds.has(intern.batch_id))
       
       setInterns(filteredInterns)
       setError('')
@@ -61,15 +65,21 @@ export default function InternManagement() {
       console.error('Failed to load interns:', err)
       setError(err.response?.data?.detail || 'Failed to load assigned interns.')
       setInterns([])
-      setBatches([])
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    load()
-  }, [user, searchQuery, batchFilter, sortBy, sortOrder])
+    loadBatches()
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      load()
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [user, searchQuery, batchFilter, sortBy, sortOrder, batches.length])
 
   async function saveProfile(id) {
     try {

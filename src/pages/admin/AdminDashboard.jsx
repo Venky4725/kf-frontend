@@ -11,9 +11,8 @@ export default function AdminDashboard() {
     async function load() {
       try {
         setLoading(true)
-const [interns, tls, batches, tasks, submissions, evaluations, notifications, profiles] = await Promise.all([
-          api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
-          api.get('/profiles', { params: { role: 'TECHNICAL_LEAD', limit: 500 } }),
+        // Consolidate API calls - fetch profiles once instead of three times
+        const [batches, tasks, submissions, evaluations, notifications, profiles] = await Promise.all([
           api.get('/batches', { params: { limit: 500 } }),
           api.get('/tasks', { params: { limit: 500 } }),
           api.get('/submissions', { params: { limit: 500 } }),
@@ -22,38 +21,41 @@ const [interns, tls, batches, tasks, submissions, evaluations, notifications, pr
           api.get('/profiles', { params: { limit: 500 } }),
         ])
 
-        // Filter only active users
-        const activeInterns = interns.data.filter(intern => intern.is_active !== false)
-        const activeTLs = tls.data.filter(tl => tl.is_active !== false)
+        const allProfiles = profiles.data || []
+        
+        // Filter active users from the single profiles list
+        const activeInterns = allProfiles.filter(p => p.role === 'INTERN' && p.is_active !== false)
+        const activeTLs = allProfiles.filter(p => p.role === 'TECHNICAL_LEAD' && p.is_active !== false)
         
         const batchMap = Object.fromEntries(batches.data.map((batch) => [batch.id, batch]))
-        const profileMap = Object.fromEntries(profiles.data.map((profile) => [profile.id, profile]))
+        const profileMap = Object.fromEntries(allProfiles.map((profile) => [profile.id, profile]))
         
         // Get recent submissions (sorted by date, most recent first)
-        const recentSubmissionsList = submissions.data
+        const recentSubmissionsList = (submissions.data || [])
           .sort((a, b) => new Date(b.submitted_for) - new Date(a.submitted_for))
           .slice(0, 5)
 
-setSummary({
+        setSummary({
           internCount: activeInterns.length,
           tlCount: activeTLs.length,
-          batchCount: batches.data.length,
-          taskCount: tasks.data.length,
-          submissionCount: submissions.data.length,
-          evaluationCount: evaluations.data.length,
-          notificationCount: notifications.data.length,
+          batchCount: batches.data?.length || 0,
+          taskCount: tasks.data?.length || 0,
+          submissionCount: submissions.data?.length || 0,
+          evaluationCount: evaluations.data?.length || 0,
+          notificationCount: notifications.data?.length || 0,
           recentSubmissions: recentSubmissionsList,
           internsByBatch: activeInterns.reduce((acc, intern) => {
             const batchName = batchMap[intern.batch_id]?.name || 'Unassigned'
             acc[batchName] = (acc[batchName] || 0) + 1
             return acc
           }, {}),
-          recentEvaluations: evaluations.data.slice(0, 5),
+          recentEvaluations: (evaluations.data || []).slice(0, 5),
           profileMap,
           batchMap,
         })
         setError('')
       } catch (err) {
+        console.error('❌ Admin Dashboard Load Error:', err)
         setError(err.response?.data?.detail || 'Failed to load admin dashboard.')
       } finally {
         setLoading(false)

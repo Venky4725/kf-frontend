@@ -75,13 +75,11 @@ export default function SubmissionsView() {
         const allowedIds = new Set(interns.map((intern) => intern.id))
         let filtered = data.filter((item) => allowedIds.size === 0 || allowedIds.has(item.user_id))
         
-        // CRITICAL: Apply batch filter if selected
+        // Apply batch filter if selected
         if (filters.batch_id) {
           filtered = filtered.filter(item => {
             const intern = internMap[item.user_id]
             if (!intern) return false
-            
-            // Normalize ID comparison
             return String(intern.batch_id) === String(filters.batch_id)
           })
         }
@@ -96,7 +94,12 @@ export default function SubmissionsView() {
         setLoading(false)
       }
     }
-    loadSubmissions()
+
+    const timer = setTimeout(() => {
+      loadSubmissions()
+    }, 300)
+    
+    return () => clearTimeout(timer)
   }, [filters.user_id, filters.submitted_for, filters.batch_id, searchQuery, sortBy, sortOrder, interns, internMap])
 
   async function deleteSubmission(id) {

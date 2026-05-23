@@ -14,12 +14,21 @@ export default function EvaluationsPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [weekFilter, setWeekFilter] = useState('')
   const [internFilter, setInternFilter] = useState('')
   const [scoreMinFilter, setScoreMinFilter] = useState('')
   const [scoreMaxFilter, setScoreMaxFilter] = useState('')
   const [sortBy, setSortBy] = useState('newest') // newest, oldest, week_asc, week_desc, score_asc, score_desc, intern_asc, intern_desc
   const [batchFilter, setBatchFilter] = useState('')
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
   
   // Edit Evaluation states (Admin and Technical Lead)
   const [editingEvaluation, setEditingEvaluation] = useState(null)
@@ -56,10 +65,10 @@ export default function EvaluationsPage() {
       const internName = internMap[item.intern_id]?.name || ''
       
       // Search: intern name, feedback, or week number
-      const matchesSearch = !searchQuery || 
-        internName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.feedback && item.feedback.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        String(item.week_number).includes(searchQuery)
+      const matchesSearch = !debouncedSearch || 
+        internName.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        (item.feedback && item.feedback.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        String(item.week_number).includes(debouncedSearch)
       
       // Week filter
       const matchesWeek = !weekFilter || item.week_number === Number(weekFilter)

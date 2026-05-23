@@ -26,42 +26,34 @@ export default function AttendanceDashboard() {
   const [attendanceData, setAttendanceData] = React.useState([])
   const [interns, setInterns] = React.useState([])
   const [batches, setBatches] = React.useState([])
-  
-  // Filter states - SAFE INITIALIZATION
-  const [dateRange, setDateRange] = React.useState(() => {
-    try {
-      const end = new Date()
-      const start = subDays(end, 30)
-      return {
-        start: format(start, 'yyyy-MM-dd'),
-        end: format(end, 'yyyy-MM-dd')
-      }
-    } catch (err) {
-      console.error('❌ Error initializing dateRange:', err)
-      // Fallback to manual date calculation
-      const end = new Date()
-      const start = new Date(end)
-      start.setDate(start.getDate() - 30)
-      return {
-        start: start.toISOString().split('T')[0],
-        end: end.toISOString().split('T')[0]
-      }
-    }
-  })
-  const [batchFilter, setBatchFilter] = React.useState('')
-  const [internFilter, setInternFilter] = React.useState('')
-  const [statusFilter, setStatusFilter] = React.useState('')
-  
-  const isAdmin = user?.role === 'ADMIN'
-  
-  // Filter interns by selected batch for dropdown
-  const filteredInternsForDropdown = React.useMemo(() => {
-    if (!batchFilter) return interns
-    return interns.filter(intern => String(intern.batch_id) === String(batchFilter))
-  }, [interns, batchFilter])
+  const [staticLoaded, setStaticLoaded] = React.useState(false)
+  const [staticLoading, setStaticLoading] = React.useState(false)
 
-  // Load data with proper error handling and debugging
-  const loadData = React.useCallback(async () => {
+  // ... (rest of states)
+
+  // Load static data once
+  const loadStaticData = React.useCallback(async () => {
+    if (!user?.id || staticLoaded) return
+    
+    setStaticLoading(true)
+    try {
+      const [internsRes, batchesRes] = await Promise.all([
+        api.get('/profiles', { params: { role: 'INTERN', limit: 1000 } }),
+        api.get('/batches', { params: { limit: 500 } }),
+      ])
+      
+      setInterns(internsRes.data || [])
+      setBatches(batchesRes.data || [])
+      setStaticLoaded(true)
+    } catch (err) {
+      console.error('❌ Failed to load static data:', err)
+    } finally {
+      setStaticLoading(false)
+    }
+  }, [user, staticLoaded])
+
+  // Load dynamic attendance data
+  const loadAttendanceData = React.useCallback(async () => {
     if (!user?.id) return
     
     setLoading(true)
@@ -77,34 +69,26 @@ export default function AttendanceDashboard() {
       if (batchFilter) params.batch_id = batchFilter
       if (statusFilter) params.status = statusFilter
       
-      const [attendanceRes, internsRes, batchesRes] = await Promise.all([
-        api.get('/attendance', { params }),
-        api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
-        api.get('/batches', { params: { limit: 500 } }),
-      ])
-      
-      // Validate and set data with fallbacks
-      const validatedAttendance = Array.isArray(attendanceRes.data) ? attendanceRes.data : []
-      const validatedInterns = Array.isArray(internsRes.data) ? internsRes.data : []
-      const validatedBatches = Array.isArray(batchesRes.data) ? batchesRes.data : []
-      
-      setAttendanceData(validatedAttendance)
-      setInterns(validatedInterns)
-      setBatches(validatedBatches)
+      const { data } = await api.get('/attendance', { params })
+      setAttendanceData(data || [])
     } catch (err) {
       console.error('❌ Failed to load dashboard data:', err)
       setError(err.response?.data?.detail || 'Failed to load attendance dashboard.')
-      setAttendanceData([])
-      setInterns([])
-      setBatches([])
     } finally {
       setLoading(false)
     }
   }, [user, dateRange.start, dateRange.end, batchFilter, statusFilter])
 
   React.useEffect(() => {
-    loadData()
-  }, [loadData])
+    loadStaticData()
+  }, [loadStaticData])
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      loadAttendanceData()
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [loadAttendanceData])
   
   // Listen for batch/TL/intern updates from other pages
   React.useEffect(() => {

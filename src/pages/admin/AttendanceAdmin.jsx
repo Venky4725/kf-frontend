@@ -47,57 +47,61 @@ export default function AttendanceAdmin() {
     return Object.fromEntries(batches.map(batch => [batch.id, batch]))
   }, [batches])
 
-  // Load data with proper error handling
-  const loadData = useCallback(async () => {
+  // Load static data once
+  const loadStaticData = useCallback(async () => {
+    if (!user?.id || staticLoaded) return
+    
+    setStaticLoading(true)
+    try {
+      const [batchesRes, internsRes] = await Promise.all([
+        api.get('/batches', { params: { limit: 500 } }),
+        api.get('/profiles', { params: { role: 'INTERN', limit: 1000 } }),
+      ])
+      
+      setBatches(batchesRes.data || [])
+      setInterns(internsRes.data || [])
+      setStaticLoaded(true)
+    } catch (err) {
+      console.error('❌ Failed to load static data:', err)
+      setError('Failed to load batches or interns.')
+    } finally {
+      setStaticLoading(false)
+    }
+  }, [user, staticLoaded])
+
+  // Load dynamic attendance data
+  const loadAttendance = useCallback(async () => {
     if (!user?.id) return
     
     setLoading(true)
-    setError('')
-    
     try {
-      const params = { limit: 500 }
+      const params = { limit: 1000 }
       
       if (searchQuery) params.search = searchQuery
       if (batchFilter) params.batch_id = batchFilter
       if (dateFilter) params.date = dateFilter
       if (statusFilter) params.status = statusFilter
       
-      const [attendanceRes, batchesRes, internsRes] = await Promise.all([
-        api.get('/attendance', { params }),
-        api.get('/batches', { params: { limit: 500 } }),
-        api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
-      ])
-      
-      setAttendance(attendanceRes.data || [])
-      setBatches(batchesRes.data || [])
-      setInterns(internsRes.data || [])
+      const { data } = await api.get('/attendance', { params })
+      setAttendance(data || [])
     } catch (err) {
       console.error('❌ Failed to load attendance:', err)
-      
-      // Detect CORS/Network failures
-      if (!err.response) {
-        if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
-          setError('❌ Backend connection failed. Please check if the server is running and CORS is configured.')
-        } else if (err.message?.includes('CORS')) {
-          setError('❌ CORS error: Backend is blocking requests from this origin.')
-        } else {
-          setError('❌ Network error: Unable to reach the backend server.')
-        }
-      } else {
-        setError(err.response?.data?.detail || 'Failed to load attendance records.')
-      }
-      
-      setAttendance([])
-      setBatches([])
-      setInterns([])
+      setError(err.response?.data?.detail || 'Failed to load attendance records.')
     } finally {
       setLoading(false)
     }
   }, [user, searchQuery, batchFilter, dateFilter, statusFilter])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    loadStaticData()
+  }, [loadStaticData])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadAttendance()
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [loadAttendance])
 
   // Mark attendance (create or update) - ENHANCED ERROR HANDLING
   const markAttendance = async (internId, status) => {
@@ -132,7 +136,7 @@ export default function AttendanceAdmin() {
       setTimeout(() => setSuccessMessage(''), 3000)
       
       // Refresh data to update UI
-      await loadData()
+      await loadAttendance()
     } catch (err) {
       console.error('❌ Failed to mark attendance:', err)
       
@@ -202,7 +206,7 @@ export default function AttendanceAdmin() {
       closeEditModal()
       
       // Refresh data to update UI
-      await loadData()
+      await loadAttendance()
     } catch (err) {
       console.error('❌ Failed to update attendance:', err)
       
@@ -241,7 +245,7 @@ export default function AttendanceAdmin() {
       setTimeout(() => setSuccessMessage(''), 3000)
       
       // Refresh data to update UI
-      await loadData()
+      await loadAttendance()
     } catch (err) {
       console.error('❌ Failed to delete attendance:', err)
       

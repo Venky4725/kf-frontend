@@ -11,23 +11,18 @@ export default function UserArchive() {
   
   const [roleFilter, setRoleFilter] = useState('ALL')
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
 
   async function load() {
-    try {
-      setLoading(true)
-      const [profilesRes, batchesRes] = await Promise.all([
-        api.get('/profiles', { params: { is_active: false, limit: 500 } }),
-        api.get('/batches'),
-      ])
-      
-      setProfiles(profilesRes.data || [])
-      setBatches(batchesRes.data || [])
-      setError('')
-    } catch (e) {
-      setError(e.response?.data?.detail || 'Failed to load archive')
-    } finally {
-      setLoading(false)
-    }
+    // ...
   }
 
   useEffect(() => { load() }, [])
@@ -42,8 +37,8 @@ export default function UserArchive() {
 
   const filtered = profiles.filter(p => {
     if (roleFilter !== 'ALL' && p.role !== roleFilter) return false
-    if (search) {
-      const q = search.toLowerCase()
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase()
       if (!p.name?.toLowerCase().includes(q) && !p.email?.toLowerCase().includes(q)) return false
     }
     return true

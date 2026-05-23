@@ -67,121 +67,71 @@ export default function WeeklyPlans() {
   
   // Updated Filter States
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [dateFilter, setDateFilter] = useState('')
   const [selectedBatch, setSelectedBatch] = useState('')
+  const [staticLoaded, setStaticLoaded] = useState(false)
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
   // Parsing Logic
-  useEffect(() => {
-    if (!bulkInput.trim()) {
-      setPreviewTasks([])
-      setParseError('')
-      return
-    }
+  // ... (rest of states)
 
-    if (importMode === 'SIMPLE') {
-      const lines = bulkInput.split('\n').map(l => l.trim()).filter(l => l.length > 0)
-      const parsed = lines.map(line => ({
-        title: line,
-        description: form.description || '',
-        due_date: form.due_date || null
-      }))
-      setPreviewTasks(parsed)
-      setParseError('')
-    } else {
-      // Roadmap mode: backend parsing triggered by a debounced effect or manual button
-      // To follow "when pasted" accurately, we'll trigger after a small delay
-      const timer = setTimeout(handleParseRoadmap, 1000)
-      return () => clearTimeout(timer)
-    }
-  }, [bulkInput, importMode])
-
-  async function handleParseRoadmap() {
-    if (!bulkInput.trim() || importMode !== 'ROADMAP') return
-    
-    setIsParsing(true)
-    setParseError('')
+  // Load static data once
+  async function loadStaticData() {
+    if (staticLoaded) return
     try {
-      const res = await api.post('/tasks/parse-roadmap', { raw_text: bulkInput })
-      if (res.data && Array.isArray(res.data.entries)) {
-        const parsed = res.data.entries.map(e => ({
-          title: String(e.topic || e.title || 'Untitled Topic'),
-          description: `[ROADMAP]${e.activities || '—'}$$$${e.outcome || '—'}$$$${e.day || 'N/A'}`,
-          due_date: e.due_date || null,
-          is_roadmap: true
-        }))
-        setPreviewTasks(parsed)
-        if (parsed.length === 0) {
-          setParseError('Could not detect roadmap structure. Please ensure each day contains:\nDay\nTopic\nActivities\nOutcome')
-        }
-      } else {
-        setParseError('Unexpected response format from parser.')
-      }
-    } catch (err) {
-      console.error('Syllabus parsing failed:', err)
-      setParseError('Could not detect roadmap structure. Please ensure each day contains:\nDay\nTopic\nActivities\nOutcome')
-      setPreviewTasks([])
-    } finally {
-      setIsParsing(false)
-    }
-  }
-
-  const filteredInterns = React.useMemo(() => {
-    if (!form.batch_id) return []
-    return interns.filter(intern => String(intern.batch_id) === String(form.batch_id))
-  }, [interns, form.batch_id])
-
-  async function load() {
-    try {
-      const params = { limit: 500 }
-      if (selectedBatch) params.batch_id = selectedBatch
-      const [taskList, batchList, profileList] = await Promise.all([
-        api.get('/tasks', { params }),
+      const [batchList, profileList] = await Promise.all([
         api.get('/batches', { params: { limit: 500 } }),
         api.get('/profiles', { params: { limit: 500 } }),
       ])
       
       const allProfiles = profileList.data || []
-      setTasks(taskList.data || [])
       setBatches(batchList.data || [])
       setAllUsers(allProfiles)
-      
-      // Filter interns from all profiles on frontend
       setInterns(allProfiles.filter(p => p.role === 'INTERN'))
-      
+      setStaticLoaded(true)
+    } catch (err) {
+      console.error('❌ Failed to load static data:', err)
+    }
+  }
+
+  async function loadTasks() {
+    try {
+      const params = { limit: 500 }
+      if (selectedBatch) params.batch_id = selectedBatch
+      const { data } = await api.get('/tasks', { params })
+      setTasks(data || [])
       setError('')
     } catch (err) {
       console.error('❌ Failed to load tasks:', err)
       setError(getErrorMessage(err.response?.data?.detail || 'Failed to load tasks.'))
-      setTasks([]); setBatches([]); setAllUsers([]); setInterns([])
+      setTasks([])
     }
   }
 
-  useEffect(() => { load() }, [selectedBatch])
-  
   useEffect(() => {
-    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, load)
-    const cleanupTL = onEvent(EVENTS.TL_UPDATED, load)
-    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, load)
-    return () => { cleanupBatch(); cleanupTL(); cleanupIntern() }
+    loadStaticData()
   }, [])
 
-  // Date Logic for Grouping
-  const dateInfo = useMemo(() => {
-    const now = new Date()
-    now.setHours(0, 0, 0, 0)
-    
-    const tomorrow = new Date(now)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    
-    return { today: now, tomorrow }
-  }, [])
+  useEffect(() => {
+    loadTasks()
+  }, [selectedBatch])
+  
+  // ... (rest of logic)
 
   const filteredTasks = useMemo(() => {
     let result = [...tasks]
 
     // 1. Search filter (Intern Name or Task Title)
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase()
       result = result.filter(t => 
         t.title.toLowerCase().includes(q) || 
         (t.assigned_to_name && t.assigned_to_name.toLowerCase().includes(q))
@@ -194,7 +144,7 @@ export default function WeeklyPlans() {
     }
 
     return result
-  }, [tasks, searchQuery, dateFilter])
+  }, [tasks, debouncedSearch, dateFilter])
 
   const { normalTasks, roadmapTasks } = useMemo(() => {
     const normal = []

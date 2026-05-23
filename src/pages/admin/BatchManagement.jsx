@@ -264,25 +264,32 @@ export default function BatchManagement() {
             />
           </div>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
+        <div className="md:col-span-3">
+          <label className="block text-xs font-bold text-slate-600 mb-1 uppercase tracking-wider">
             Assign Technical Leads (Optional)
           </label>
           <select 
-            className="input min-h-[100px]" 
+            className="input min-h-[160px] w-full bg-white border-slate-200 focus:ring-2 focus:ring-brand-500/20 transition-all" 
             multiple
             value={form.team_lead_ids} 
             onChange={(e) => handleTechLeadSelect(e, false)}
           >
             {tls.map((tl) => (
-              <option key={tl.id} value={tl.id}>{tl.name} ({tl.email})</option>
+              <option key={tl.id} value={tl.id} className="py-1.5 px-2 cursor-pointer hover:bg-slate-50">
+                {tl.name} — {tl.email}
+              </option>
             ))}
           </select>
-          <p className="text-xs text-slate-500 mt-1">
-            Hold Ctrl/Cmd to select multiple tech leads
-          </p>
+          <div className="flex justify-between items-center mt-2">
+            <p className="text-[11px] text-slate-500">
+              <span className="font-semibold text-brand-700">Tip:</span> Hold <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-sans text-[10px]">Ctrl</kbd> or <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-sans text-[10px]">Cmd</kbd> to select multiple tech leads
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {form.team_lead_ids.length} selected
+            </p>
+          </div>
         </div>
-        <button className="btn-primary w-full" type="submit">Create Batch</button>
+        <button className="btn-primary w-full py-3 font-bold" type="submit">Create Batch</button>
       </form>
 
       <div className="card overflow-x-auto">
@@ -335,20 +342,25 @@ export default function BatchManagement() {
                       />
                     ) : item.start_date}
                   </td>
-                  <td className="td">
+                  <td className="td align-top">
                     {editingId === item.id ? (
-                      <select 
-                        className="input min-h-[80px]" 
-                        multiple
-                        value={editingForm.team_lead_ids || []} 
-                        onChange={(e) => handleTechLeadSelect(e, true)}
-                      >
-                        {tls.map((tl) => (
-                          <option key={tl.id} value={tl.id}>{tl.name}</option>
-                        ))}
-                      </select>
+                      <div className="min-w-[180px]">
+                        <select 
+                          className="input min-h-[120px] w-full bg-white text-sm" 
+                          multiple
+                          value={editingForm.team_lead_ids || []} 
+                          onChange={(e) => handleTechLeadSelect(e, true)}
+                        >
+                          {tls.map((tl) => (
+                            <option key={tl.id} value={tl.id} className="py-1">{tl.name}</option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-slate-400 mt-1 italic">Ctrl+Click to select</p>
+                      </div>
                     ) : (
-                      <span className="font-medium">{formatBatchTechLeads(item)}</span>
+                      <div className="max-w-[200px] break-words">
+                        <span className="font-medium">{formatBatchTechLeads(item)}</span>
+                      </div>
                     )}
                   </td>
                   <td className="td space-x-3">

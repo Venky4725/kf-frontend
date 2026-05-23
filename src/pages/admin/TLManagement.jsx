@@ -431,18 +431,23 @@ export default function TLManagement() {
                     <input className="input" value={editingForm.tech_stack || ''} onChange={(e) => { setEditingForm({ ...editingForm, tech_stack: e.target.value }); setError(''); }} />
                   ) : (item.tech_stack || '—')}
                 </td>
-                <td className="td">
+                <td className="td align-top">
                   {editingId === item.id ? (
-                    <select 
-                      className="input min-h-[80px]" 
-                      multiple
-                      value={editingForm.batch_ids || []} 
-                      onChange={(e) => handleBatchSelect(e, true)}
-                    >
-                      {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}
-                    </select>
+                    <div className="min-w-[180px]">
+                      <select 
+                        className="input min-h-[120px] w-full bg-white text-sm" 
+                        multiple
+                        value={editingForm.batch_ids || []} 
+                        onChange={(e) => handleBatchSelect(e, true)}
+                      >
+                        {batches.map((batch) => <option key={batch.id} value={batch.id} className="py-1">{batch.name}</option>)}
+                      </select>
+                      <p className="text-[10px] text-slate-400 mt-1 italic">Ctrl+Click to select</p>
+                    </div>
                   ) : (
-                    batchName(item)
+                    <div className="max-w-[200px] break-words">
+                      {batchName(item)}
+                    </div>
                   )}
                 </td>
                 <td className="td">

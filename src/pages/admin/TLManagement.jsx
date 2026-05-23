@@ -367,18 +367,31 @@ export default function TLManagement() {
             {fieldErrors.tech_stack && <p className="text-xs text-red-600 mt-1">{fieldErrors.tech_stack}</p>}
           </div>
           
-          <div>
+          <div className="md:col-span-2">
+            <label className="block text-xs font-bold text-slate-600 mb-1 uppercase tracking-wider">
+              Assign to Batches (Optional)
+            </label>
             <select 
-              className={`input min-h-[100px] ${fieldErrors.batch_ids ? 'border-red-500' : ''}`}
+              className={`input min-h-[160px] w-full bg-white border-slate-200 focus:ring-2 focus:ring-cyan-500/20 transition-all ${fieldErrors.batch_ids ? 'border-red-500' : ''}`}
               multiple
               value={form.batch_ids} 
               onChange={(e) => handleBatchSelect(e, false)}
             >
               {batches.map((b) => (
-                <option key={b.id} value={b.id}>{b.name} ({b.tech_stack})</option>
+                <option key={b.id} value={b.id} className="py-1.5 px-2 cursor-pointer hover:bg-slate-50">
+                  {b.name} — {b.tech_stack}
+                </option>
               ))}
             </select>
-            <p className="text-xs text-slate-500 mt-1">Hold Ctrl/Cmd to select multiple batches</p>
+            <div className="flex justify-between items-center mt-2">
+              <p className="text-[11px] text-slate-500">
+                <span className="font-semibold text-cyan-700">Tip:</span> Hold <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-sans text-[10px]">Ctrl</kbd> or <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-sans text-[10px]">Cmd</kbd> to select multiple batches
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {form.batch_ids.length} selected
+              </p>
+            </div>
+            {fieldErrors.batch_ids && <p className="text-xs text-red-600 mt-1">{fieldErrors.batch_ids}</p>}
           </div>
         </div>
         

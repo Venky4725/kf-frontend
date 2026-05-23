@@ -61,6 +61,11 @@ function AR({ roles, children }) {
 
 
 export default function App() {
+  // Silent health warmup to reduce backend cold start impact
+  useEffect(() => {
+    api.get('/health').catch(() => { /* ignore error */ })
+  }, [])
+
   return (
     <AuthProvider>
       <BrowserRouter>

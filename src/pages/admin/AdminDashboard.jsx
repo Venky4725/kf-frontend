@@ -1,72 +1,98 @@
-import { useEffect, useState } from 'react'
-
+import { useEffect, useState, useMemo } from 'react'
 import api from '../../lib/api'
 
 export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [summary, setSummary] = useState(null)
+  
+  // Split state for independent loading/rendering
+  const [counts, setCounts] = useState(null)
+  const [attendanceStats, setAttendanceStats] = useState(null)
+  const [evaluationStats, setEvaluationStats] = useState(null)
+  const [recentData, setRecentData] = useState({ submissions: [], evaluations: [], profileMap: {}, batchMap: {} })
+  
+  const [countsLoading, setCountsLoading] = useState(true)
+  const [attendanceLoading, setAttendanceLoading] = useState(true)
+  const [evalLoading, setEvalLoading] = useState(true)
 
   useEffect(() => {
-    async function load() {
+    const controller = new AbortController()
+    
+    async function loadDashboard() {
+      console.time('🚀 Admin Dashboard Total Load')
+      setLoading(true)
+      
       try {
-        setLoading(true)
-        // Consolidate API calls - fetch profiles once instead of three times
-        const [batches, tasks, submissions, evaluations, notifications, profiles] = await Promise.all([
-          api.get('/batches', { params: { limit: 500 } }),
-          api.get('/tasks', { params: { limit: 500 } }),
-          api.get('/submissions', { params: { limit: 500 } }),
-          api.get('/evaluations', { params: { limit: 500 } }),
-          api.get('/notifications', { params: { limit: 500 } }),
-          api.get('/profiles', { params: { limit: 500 } }),
-        ])
+        // 1. Parallel Stats & Main Data
+        const statsPromises = [
+          // Counts (Interns, TLs, Batches, etc.)
+          api.get('/dashboard/stats/counts', { signal: controller.signal })
+            .then(res => { setCounts(res.data); setCountsLoading(false) })
+            .catch(err => console.error('Counts load error:', err)),
+            
+          // Attendance Summary
+          api.get('/dashboard/stats/attendance', { signal: controller.signal })
+            .then(res => { setAttendanceStats(res.data); setAttendanceLoading(false) })
+            .catch(err => console.error('Attendance load error:', err)),
+            
+          // Evaluations Summary
+          api.get('/dashboard/stats/evaluations', { signal: controller.signal })
+            .then(res => { setEvaluationStats(res.data); setEvalLoading(false) })
+            .catch(err => console.error('Evaluations load error:', err)),
 
-        const allProfiles = profiles.data || []
-        
-        // Filter active users from the single profiles list
-        const activeInterns = allProfiles.filter(p => p.role === 'INTERN' && p.is_active !== false)
-        const activeTLs = allProfiles.filter(p => p.role === 'TECHNICAL_LEAD' && p.is_active !== false)
-        
-        const batchMap = Object.fromEntries(batches.data.map((batch) => [batch.id, batch]))
-        const profileMap = Object.fromEntries(allProfiles.map((profile) => [profile.id, profile]))
-        
-        // Get recent submissions (sorted by date, most recent first)
-        const recentSubmissionsList = (submissions.data || [])
-          .sort((a, b) => new Date(b.submitted_for) - new Date(a.submitted_for))
-          .slice(0, 5)
+          // Recent Activity (Submissions, etc.)
+          api.get('/profiles', { params: { limit: 500 }, signal: controller.signal }),
+          api.get('/batches', { params: { limit: 500 }, signal: controller.signal }),
+          api.get('/submissions', { params: { limit: 5 }, signal: controller.signal }),
+          api.get('/evaluations', { params: { limit: 5 }, signal: controller.signal }),
+        ]
 
-        setSummary({
-          internCount: activeInterns.length,
-          tlCount: activeTLs.length,
-          batchCount: batches.data?.length || 0,
-          taskCount: tasks.data?.length || 0,
-          submissionCount: submissions.data?.length || 0,
-          evaluationCount: evaluations.data?.length || 0,
-          notificationCount: notifications.data?.length || 0,
-          recentSubmissions: recentSubmissionsList,
-          internsByBatch: activeInterns.reduce((acc, intern) => {
-            const batchName = batchMap[intern.batch_id]?.name || 'Unassigned'
-            acc[batchName] = (acc[batchName] || 0) + 1
-            return acc
-          }, {}),
-          recentEvaluations: (evaluations.data || []).slice(0, 5),
+        const results = await Promise.allSettled(statsPromises)
+        
+        // Process recent activity results
+        const profilesRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
+        const batchesRes = results[4].status === 'fulfilled' ? results[4].value : { data: [] }
+        const submissionsRes = results[5].status === 'fulfilled' ? results[5].value : { data: [] }
+        const evaluationsRes = results[6].status === 'fulfilled' ? results[6].value : { data: [] }
+
+        const allProfiles = profilesRes.data || []
+        const profileMap = Object.fromEntries(allProfiles.map((p) => [p.id, p]))
+        const batchMap = Object.fromEntries((batchesRes.data || []).map((b) => [b.id, b]))
+
+        setRecentData({
+          submissions: submissionsRes.data || [],
+          evaluations: evaluationsRes.data || [],
           profileMap,
-          batchMap,
+          batchMap
         })
+
         setError('')
       } catch (err) {
-        console.error('❌ Admin Dashboard Load Error:', err)
-        setError(err.response?.data?.detail || 'Failed to load admin dashboard.')
+        if (err.name !== 'CanceledError') {
+          console.error('❌ Admin Dashboard Load Error:', err)
+          setError(err.response?.data?.detail || 'Failed to load admin dashboard.')
+        }
       } finally {
         setLoading(false)
+        console.timeEnd('🚀 Admin Dashboard Total Load')
       }
     }
 
-    load()
+    loadDashboard()
+    return () => controller.abort()
   }, [])
 
-  if (loading) return <div className="text-slate-500">Loading dashboard...</div>
-  if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700">{error}</div>
+  const internsByBatch = useMemo(() => {
+    if (!recentData.profileMap || !recentData.batchMap) return {}
+    const interns = Object.values(recentData.profileMap).filter(p => p.role === 'INTERN' && p.is_active !== false)
+    return interns.reduce((acc, intern) => {
+      const batchName = recentData.batchMap[intern.batch_id]?.name || 'Unassigned'
+      acc[batchName] = (acc[batchName] || 0) + 1
+      return acc
+    }, {})
+  }, [recentData.profileMap, recentData.batchMap])
+
+  if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700 m-6">{error}</div>
 
   return (
     <div className="space-y-6">
@@ -74,131 +100,197 @@ export default function AdminDashboard() {
         <div className="text-xs uppercase tracking-[0.25em] text-brand-200 font-semibold">Administrator</div>
         <h1 className="text-4xl font-black mt-3">Knowledge Factory Control Center</h1>
         <p className="text-sm text-slate-200 mt-3 max-w-3xl">
-          Real-time view of the MVP backend across profiles, batches, tasks, attendance-linked submissions,
-          evaluations, and notifications.
+          Real-time view of the MVP backend across profiles, batches, tasks, and analytics.
         </p>
       </section>
 
+      {/* Navigation Quick Links */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <a
-          href="/admin/tls"
-          className="card hover:shadow-lg transition-shadow cursor-pointer bg-gradient-to-br from-cyan-50 to-cyan-100 border-cyan-200"
-        >
-          <div className="text-sm font-semibold text-cyan-900">Technical Leads</div>
-          <div className="text-xs text-cyan-700 mt-1">Manage TL profiles</div>
-        </a>
-        <a
-          href="/admin/interns"
-          className="card hover:shadow-lg transition-shadow cursor-pointer bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200"
-        >
-          <div className="text-sm font-semibold text-blue-900">Interns</div>
-          <div className="text-xs text-blue-700 mt-1">Manage intern profiles</div>
-        </a>
-        <a
-          href="/admin/archive"
-          className="card hover:shadow-lg transition-shadow cursor-pointer bg-gradient-to-br from-slate-50 to-slate-100 border-slate-200"
-        >
-          <div className="text-sm font-semibold text-slate-900">User Archive</div>
-          <div className="text-xs text-slate-700 mt-1">View inactive users</div>
-        </a>
+        <QuickLink href="/admin/tls" title="Technical Leads" subtitle="Manage TL profiles" color="cyan" />
+        <QuickLink href="/admin/interns" title="Interns" subtitle="Manage intern profiles" color="blue" />
+        <QuickLink href="/admin/archive" title="User Archive" subtitle="View inactive users" color="slate" />
       </section>
 
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Kpi label="Interns" value={summary.internCount} />
-        <Kpi label="Technical Leads" value={summary.tlCount} />
-        <Kpi label="Batches" value={summary.batchCount} />
-        <Kpi label="Tasks" value={summary.taskCount} />
-        <Kpi label="Submissions" value={summary.submissionCount} />
-        <Kpi label="Evaluations" value={summary.evaluationCount} />
-        <Kpi label="Notifications" value={summary.notificationCount} />
+      {/* KPI Section */}
+      <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+        <Kpi label="Interns" value={counts?.interns} loading={countsLoading} />
+        <Kpi label="TLs" value={counts?.tls} loading={countsLoading} />
+        <Kpi label="Batches" value={counts?.batches} loading={countsLoading} />
+        <Kpi label="Tasks" value={counts?.tasks} loading={countsLoading} />
+        <Kpi label="Submissions" value={counts?.submissions} loading={countsLoading} />
+        <Kpi label="Evaluations" value={counts?.evaluations} loading={countsLoading} />
+        <Kpi label="Notifications" value={counts?.notifications} loading={countsLoading} />
       </section>
 
+      {/* Analytics Grid */}
       <section className="grid lg:grid-cols-2 gap-6">
+        {/* Attendance Widget */}
+        <div className="card">
+          <h2 className="text-lg font-semibold mb-4 flex items-center justify-between">
+            Attendance Summary
+            {attendanceLoading && <span className="text-xs animate-pulse text-slate-400 font-normal">Updating...</span>}
+          </h2>
+          {attendanceLoading ? <Skeleton h="120px" /> : (
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="p-3 rounded-lg bg-emerald-50">
+                <div className="text-xs text-emerald-600 font-bold uppercase tracking-wider">Present</div>
+                <div className="text-2xl font-black text-emerald-700">{attendanceStats?.present || 0}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-amber-50">
+                <div className="text-xs text-amber-600 font-bold uppercase tracking-wider">Late</div>
+                <div className="text-2xl font-black text-amber-700">{attendanceStats?.late || 0}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-rose-50">
+                <div className="text-xs text-rose-600 font-bold uppercase tracking-wider">Absent</div>
+                <div className="text-2xl font-black text-rose-700">{attendanceStats?.absent || 0}</div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Evaluation Summary */}
+        <div className="card">
+          <h2 className="text-lg font-semibold mb-4 flex items-center justify-between">
+            Evaluation Metrics
+            {evalLoading && <span className="text-xs animate-pulse text-slate-400 font-normal">Updating...</span>}
+          </h2>
+          {evalLoading ? <Skeleton h="120px" /> : (
+            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+              <div>
+                <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">Avg Score</div>
+                <div className="text-4xl font-black text-brand-700">{evaluationStats?.average_score?.toFixed(1) || '0.0'}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">This Week</div>
+                <div className="text-2xl font-black text-slate-900">{evaluationStats?.this_week_count || 0}</div>
+                <div className="text-[10px] text-slate-400">Total Evaluations</div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Intern Distribution */}
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">Intern Distribution by Batch</h2>
           <div className="space-y-3">
-            {Object.entries(summary.internsByBatch).length === 0 && (
-              <div className="text-sm text-slate-500">No intern profiles found.</div>
+            {loading && Object.keys(internsByBatch).length === 0 ? <Skeleton h="100px" /> : (
+              <>
+                {Object.entries(internsByBatch).length === 0 && (
+                  <div className="text-sm text-slate-500">No intern profiles found.</div>
+                )}
+                {Object.entries(internsByBatch).map(([name, count]) => (
+                  <div key={name} className="flex items-center justify-between">
+                    <span className="text-sm text-slate-700">{name}</span>
+                    <span className="text-sm font-semibold text-brand-700">{count}</span>
+                  </div>
+                ))}
+              </>
             )}
-            {Object.entries(summary.internsByBatch).map(([name, count]) => (
-              <div key={name} className="flex items-center justify-between">
-                <span className="text-sm text-slate-700">{name}</span>
-                <span className="text-sm font-semibold text-brand-700">{count}</span>
-              </div>
-            ))}
           </div>
         </div>
 
+        {/* Recent Submissions */}
         <div className="card">
-          <h2 className="text-lg font-semibold mb-4">Recent Submission Activity</h2>
+          <h2 className="text-lg font-semibold mb-4">Recent Submissions</h2>
           <div className="space-y-3">
-            {summary.recentSubmissions.length === 0 && (
-              <div className="text-sm text-slate-500">No submissions yet.</div>
+            {loading && recentData.submissions.length === 0 ? <Skeleton h="150px" /> : (
+              <>
+                {recentData.submissions.length === 0 && (
+                  <div className="text-sm text-slate-500">No submissions yet.</div>
+                )}
+                {recentData.submissions.map((submission) => {
+                  const internProfile = recentData.profileMap[submission.intern_id]
+                  const batchName = submission.batch_name ?? recentData.batchMap[submission.batch_id]?.name ?? 'N/A'
+                  const internName = internProfile?.name ?? submission.intern_name ?? 'Unknown'
+                  
+                  return (
+                    <div key={submission.id} className="flex items-start justify-between gap-4 pb-3 border-b border-slate-100 last:border-b-0">
+                      <div className="flex-1">
+                        <p className="font-medium text-slate-900">{batchName}</p>
+                        <p className="text-sm text-slate-600">{internName}</p>
+                        <p className="text-xs text-slate-400 mt-1">{submission.submitted_for}</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
             )}
-            {summary.recentSubmissions.map((submission) => {
-              const internProfile = summary.profileMap[submission.intern_id]
-              const batchName = submission.batch_name ?? summary.batchMap[submission.batch_id]?.name ?? 'N/A'
-              const internName = internProfile?.name ?? submission.intern_name ?? 'Unknown'
-              
-              return (
-                <div key={submission.id} className="flex items-start justify-between gap-4 pb-3 border-b border-slate-100 last:border-b-0">
-                  <div className="flex-1">
-                    <p className="font-medium text-slate-900">{batchName}</p>
-                    <p className="text-sm text-slate-600">{internName}</p>
-                    <p className="text-xs text-slate-400 mt-1">{submission.submitted_for}</p>
-                  </div>
-                </div>
-              )
-            })}
           </div>
         </div>
       </section>
 
+      {/* Evaluations Table */}
       <section className="card">
-        <h2 className="text-lg font-semibold mb-4">Recent Evaluations</h2>
-        {summary.recentEvaluations.length === 0 ? (
-          <div className="text-sm text-slate-500">No evaluations recorded yet.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="th">Batch</th>
-                  <th className="th">Intern Name</th>
-                  <th className="th">Week</th>
-                  <th className="th">Score</th>
-                  <th className="th">Feedback</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {summary.recentEvaluations.map((item) => {
-                  const profile = summary.profileMap[item.intern_id]
-                  const batchName = summary.batchMap[profile?.batch_id]?.name ?? 'N/A'
-                  const internName = profile?.name || item.intern_id
-                  return (
-                    <tr key={item.id}>
-                      <td className="td">{batchName}</td>
-                      <td className="td">{internName}</td>
-                      <td className="td">{item.week_number}</td>
-                      <td className="td font-semibold">{item.score}</td>
-                      <td className="td">{item.feedback || '—'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+        <h2 className="text-lg font-semibold mb-4">Latest Evaluations</h2>
+        {loading && recentData.evaluations.length === 0 ? <Skeleton h="200px" /> : (
+          recentData.evaluations.length === 0 ? (
+            <div className="text-sm text-slate-500">No evaluations recorded yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="th">Batch</th>
+                    <th className="th">Intern Name</th>
+                    <th className="th">Week</th>
+                    <th className="th">Score</th>
+                    <th className="th">Feedback</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {recentData.evaluations.map((item) => {
+                    const profile = recentData.profileMap[item.intern_id]
+                    const batchName = recentData.batchMap[profile?.batch_id]?.name ?? 'N/A'
+                    const internName = profile?.name || item.intern_id
+                    return (
+                      <tr key={item.id}>
+                        <td className="td">{batchName}</td>
+                        <td className="td">{internName}</td>
+                        <td className="td">{item.week_number}</td>
+                        <td className="td font-semibold">{item.score}</td>
+                        <td className="td text-slate-600 text-sm truncate max-w-xs">{item.feedback || '—'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
         )}
       </section>
     </div>
   )
 }
 
-function Kpi({ label, value }) {
+function Kpi({ label, value, loading }) {
   return (
-    <div className="card">
-      <div className="text-xs uppercase tracking-[0.2em] text-slate-500 font-semibold">{label}</div>
-      <div className="text-3xl font-black text-slate-900 mt-2">{value}</div>
+    <div className="card p-4">
+      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">{label}</div>
+      {loading ? (
+        <div className="h-8 w-12 bg-slate-100 animate-pulse rounded mt-2"></div>
+      ) : (
+        <div className="text-2xl font-black text-slate-900 mt-1">{value ?? 0}</div>
+      )}
     </div>
   )
 }
+
+function QuickLink({ href, title, subtitle, color }) {
+  const colors = {
+    cyan: 'from-cyan-50 to-cyan-100 border-cyan-200 text-cyan-900',
+    blue: 'from-blue-50 to-blue-100 border-blue-200 text-blue-900',
+    slate: 'from-slate-50 to-slate-100 border-slate-200 text-slate-900'
+  }
+  
+  return (
+    <a href={href} className={`card hover:shadow-lg transition-all transform hover:-translate-y-1 cursor-pointer bg-gradient-to-br ${colors[color]}`}>
+      <div className="text-sm font-bold">{title}</div>
+      <div className="text-xs opacity-75 mt-1">{subtitle}</div>
+    </a>
+  )
+}
+
+function Skeleton({ h }) {
+  return <div className="bg-slate-100 animate-pulse rounded-xl w-full" style={{ height: h }}></div>
+}
+

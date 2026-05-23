@@ -16,6 +16,11 @@ export default function SubmissionsView() {
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(true)
 
+  // Pagination states
+  const [skip, setSkip] = useState(0)
+  const [limit] = useState(20)
+  const [hasMore, setHasMore] = useState(true)
+
   const internMap = useMemo(() => Object.fromEntries(interns.map((intern) => [intern.id, intern])), [interns])
   const batchMap = useMemo(() => Object.fromEntries(batches.map((batch) => [batch.id, batch])), [batches])
   
@@ -27,14 +32,16 @@ export default function SubmissionsView() {
 
   // Load interns and batches once on mount
   useEffect(() => {
+    const controller = new AbortController()
+    
     async function loadData() {
       const userId = user?.id
       if (!userId) return
       
       try {
         const [profiles, batchesRes] = await Promise.all([
-          api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
-          api.get('/batches', { params: { limit: 500 } }),
+          api.get('/profiles', { params: { role: 'INTERN', limit: 500 }, signal: controller.signal }),
+          api.get('/batches', { params: { limit: 500 }, signal: controller.signal }),
         ])
         
         // For Tech Lead, filter to assigned batches only
@@ -47,61 +54,78 @@ export default function SubmissionsView() {
           setInterns(profiles.data)
         }
       } catch (err) {
-        console.error('❌ Failed to load data:', err)
-        setError(err.response?.data?.detail || 'Failed to load data.')
+        if (err.name !== 'CanceledError') {
+          console.error('❌ Failed to load data:', err)
+          setError(err.response?.data?.detail || 'Failed to load data.')
+        }
       }
     }
     loadData()
+    return () => controller.abort()
   }, [user?.id, user?.role])
 
-  // Load submissions after interns are loaded
-  useEffect(() => {
-    async function loadSubmissions() {
-      if (interns.length === 0) return  // Wait for interns to load first
-      
-      setLoading(true)
-      try {
-        const params = { limit: 500 }
-        if (filters.user_id) params.user_id = filters.user_id
-        if (filters.submitted_for) params.submitted_for = filters.submitted_for
-        if (searchQuery) params.search = searchQuery
-        if (sortBy) {
-          params.sort_by = sortBy
-          params.order = sortOrder
-        }
-        
-        const { data } = await api.get('/submissions', { params })
-        
-        // Filter to allowed interns only (batch-scoped)
-        const allowedIds = new Set(interns.map((intern) => intern.id))
-        let filtered = data.filter((item) => allowedIds.size === 0 || allowedIds.has(item.user_id))
-        
-        // Apply batch filter if selected
-        if (filters.batch_id) {
-          filtered = filtered.filter(item => {
-            const intern = internMap[item.user_id]
-            if (!intern) return false
-            return String(intern.batch_id) === String(filters.batch_id)
-          })
-        }
-        
-        setSubmissions(filtered || [])
-        setError('')
-      } catch (err) {
-        console.error('❌ Failed to load submissions:', err)
-        setError(err.response?.data?.detail || 'Failed to load submissions.')
-        setSubmissions([])
-      } finally {
-        setLoading(false)
+  // Load submissions
+  const loadSubmissions = useCallback(async (isLoadMore = false) => {
+    if (interns.length === 0) return
+    
+    setLoading(true)
+    const currentSkip = isLoadMore ? skip + limit : 0
+    
+    try {
+      console.time('🚀 Submissions Fetch')
+      const params = { 
+        limit: limit,
+        skip: currentSkip
       }
-    }
+      if (filters.user_id) params.user_id = filters.user_id
+      if (filters.submitted_for) params.submitted_for = filters.submitted_for
+      if (searchQuery) params.search = searchQuery
+      if (sortBy) {
+        params.sort_by = sortBy
+        params.order = sortOrder
+      }
+      
+      const { data } = await api.get('/submissions', { params })
+      
+      // Filter to allowed interns only (batch-scoped) if not done by backend
+      const allowedIds = new Set(interns.map((intern) => intern.id))
+      let filtered = data.filter((item) => allowedIds.size === 0 || allowedIds.has(item.user_id))
+      
+      // Apply batch filter if selected
+      if (filters.batch_id) {
+        filtered = filtered.filter(item => {
+          const intern = internMap[item.user_id]
+          if (!intern) return false
+          return String(intern.batch_id) === String(filters.batch_id)
+        })
+      }
 
+      if (isLoadMore) {
+        setSubmissions(prev => [...prev, ...filtered])
+      } else {
+        setSubmissions(filtered)
+      }
+      
+      setSkip(currentSkip)
+      setHasMore(data.length === limit)
+      setError('')
+    } catch (err) {
+      console.error('❌ Failed to load submissions:', err)
+      setError(err.response?.data?.detail || 'Failed to load submissions.')
+    } finally {
+      setLoading(false)
+      console.timeEnd('🚀 Submissions Fetch')
+    }
+  }, [interns, filters, searchQuery, sortBy, sortOrder, skip, limit, internMap])
+
+  useEffect(() => {
     const timer = setTimeout(() => {
-      loadSubmissions()
+      setSkip(0)
+      loadSubmissions(false)
     }, 300)
     
     return () => clearTimeout(timer)
-  }, [filters.user_id, filters.submitted_for, filters.batch_id, searchQuery, sortBy, sortOrder, interns, internMap])
+  }, [filters.user_id, filters.submitted_for, filters.batch_id, searchQuery, sortBy, sortOrder, interns.length])
 
   async function deleteSubmission(id) {
     if (!window.confirm('Delete this submission?')) return
@@ -110,21 +134,12 @@ export default function SubmissionsView() {
       await api.delete(`/submissions/${id}`)
       setSuccess('Submission deleted successfully.')
       setTimeout(() => setSuccess(''), 3000)
-      // Reload submissions
-      const params = { limit: 500 }
-      if (filters.user_id) params.user_id = filters.user_id
-      if (filters.submitted_for) params.submitted_for = filters.submitted_for
-      const { data } = await api.get('/submissions', { params })
-      const allowedIds = new Set(interns.map((intern) => intern.id))
-      const filtered = data.filter((item) => allowedIds.size === 0 || allowedIds.has(item.user_id))
-      setSubmissions(filtered)
+      
+      // Refresh current view
+      setSubmissions(prev => prev.filter(s => s.id !== id))
     } catch (err) {
       console.error('Failed to delete submission:', err)
-      if (err.response?.status === 403) {
-        setError('Access denied.')
-      } else {
-        setError(err.response?.data?.detail || 'Failed to delete submission.')
-      }
+      setError(err.response?.data?.detail || 'Failed to delete submission.')
     }
   }
 
@@ -199,42 +214,57 @@ export default function SubmissionsView() {
       </div>
 
       <div className="space-y-3">
-        {loading ? (
-          <div className="card text-slate-500">Loading submissions...</div>
+        {loading && submissions.length === 0 ? (
+          <div className="card text-slate-500 italic">Loading submissions...</div>
         ) : submissions.length === 0 ? (
           <div className="card text-slate-500">No submissions found.</div>
         ) : (
-          submissions.map((item) => {
-            const intern = internMap[item.user_id]
-            const batchName = intern ? batchMap[intern.batch_id]?.name || 'Unassigned' : 'Unknown'
-            
-            return (
-              <div key={item.id} className="card">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-semibold text-slate-900">
-                          {item.submitted_by_name || intern?.name || item.user_id}
+          <>
+            {submissions.map((item) => {
+              const intern = internMap[item.user_id]
+              const batchName = intern ? batchMap[intern.batch_id]?.name || 'Unassigned' : 'Unknown'
+              
+              return (
+                <div key={item.id} className="card hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-semibold text-slate-900">
+                            {item.submitted_by_name || intern?.name || item.user_id}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            Batch: {batchName}
+                          </div>
                         </div>
-                        <div className="text-xs text-slate-500 mt-1">
-                          Batch: {batchName}
-                        </div>
+                        <div className="text-xs text-slate-400 font-medium px-2 py-1 bg-slate-50 rounded border border-slate-100">{item.submitted_for}</div>
                       </div>
-                      <div className="text-xs text-slate-400">{item.submitted_for}</div>
+                      <div className="text-sm text-slate-700 mt-3 whitespace-pre-wrap leading-relaxed">{item.content}</div>
                     </div>
-                    <div className="text-sm text-slate-700 mt-3 whitespace-pre-wrap">{item.content}</div>
+                    <button
+                      onClick={() => deleteSubmission(item.id)}
+                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all shrink-0"
+                      title="Delete Submission"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                    </button>
                   </div>
-                  <button
-                    onClick={() => deleteSubmission(item.id)}
-                    className="px-3 py-1.5 text-sm font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-all duration-200 shrink-0"
-                  >
-                    Delete
-                  </button>
                 </div>
+              )
+            })}
+            
+            {hasMore && (
+              <div className="text-center pt-4">
+                <button 
+                  onClick={() => loadSubmissions(true)}
+                  disabled={loading}
+                  className="text-sm font-bold text-brand-700 hover:text-brand-800 transition-colors py-2.5 px-8 rounded-xl bg-white border border-brand-200 shadow-sm"
+                >
+                  {loading ? 'Loading...' : 'Load More Submissions'}
+                </button>
               </div>
-            )
-          })
+            )}
+          </>
         )}
       </div>
     </div>

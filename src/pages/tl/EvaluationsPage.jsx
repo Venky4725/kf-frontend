@@ -125,12 +125,15 @@ export default function EvaluationsPage() {
     const userId = user?.id
     if (!userId) return
 
+    const controller = new AbortController()
+    console.time('🚀 Evaluations Page Load')
+    
     try {
       const [profiles, batchesRes, evaluationList] = await Promise.all([
-        api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
-        api.get('/batches', { params: { limit: 500 } }),
+        api.get('/profiles', { params: { role: 'INTERN', limit: 500 }, signal: controller.signal }),
+        api.get('/batches', { params: { limit: 500 }, signal: controller.signal }),
         // DO NOT filter by reviewed_by - show all evaluations from assigned batches
-        api.get('/evaluations', { params: { limit: 500 } }),
+        api.get('/evaluations', { params: { limit: 500 }, signal: controller.signal }),
       ])
 
       // Set batches for all roles
@@ -155,12 +158,18 @@ export default function EvaluationsPage() {
       }
       setError('')
     } catch (err) {
-      console.error('❌ Failed to load evaluations:', err)
-      setError(err.response?.data?.detail || 'Failed to load evaluations.')
-      setInterns([])
-      setBatches([])
-      setEvaluations([])
+      if (err.name !== 'CanceledError') {
+        console.error('❌ Failed to load evaluations:', err)
+        setError(err.response?.data?.detail || 'Failed to load evaluations.')
+        setInterns([])
+        setBatches([])
+        setEvaluations([])
+      }
+    } finally {
+      console.timeEnd('🚀 Evaluations Page Load')
     }
+    
+    return () => controller.abort()
   }, [user?.id, user?.role])
 
   useEffect(() => {

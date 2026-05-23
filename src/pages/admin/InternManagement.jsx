@@ -28,6 +28,12 @@ export default function InternManagement() {
   const [batchFilter, setBatchFilter] = useState('')
   const [sortOption, setSortOption] = useState('name_asc')
 
+  // Pagination states
+  const [skip, setSkip] = useState(0)
+  const [limit] = useState(25)
+  const [totalCount, setTotalCount] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+
   async function loadBatches() {
     try {
       const { data } = await api.get('/batches', { params: { limit: 500 } })
@@ -37,15 +43,19 @@ export default function InternManagement() {
     }
   }
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isLoadMore = false) => {
     const userId = user?.id
     if (!userId) return
     
     setLoading(true)
+    const currentSkip = isLoadMore ? skip + limit : 0
+    
     try {
+      console.time('🚀 Interns Fetch')
       const params = {
         role: 'INTERN',
-        limit: 500,
+        limit: limit,
+        skip: currentSkip
       }
 
       if (nameFilter) params.search_name = nameFilter
@@ -59,15 +69,24 @@ export default function InternManagement() {
       if (sortOrder) params.sort_order = sortOrder
 
       const { data } = await api.get('/profiles', { params })
-      setInterns(data || [])
+      
+      if (isLoadMore) {
+        setInterns(prev => [...prev, ...(data || [])])
+      } else {
+        setInterns(data || [])
+      }
+      
+      setSkip(currentSkip)
+      setHasMore((data || []).length === limit)
       setError('')
     } catch (err) {
       console.error('❌ Failed to load interns:', err)
       setError(err.response?.data?.detail || 'Failed to load intern profiles.')
     } finally {
       setLoading(false)
+      console.timeEnd('🚀 Interns Fetch')
     }
-  }, [user?.id, nameFilter, emailFilter, techStackFilter, batchFilter, sortOption])
+  }, [user?.id, nameFilter, emailFilter, techStackFilter, batchFilter, sortOption, skip, limit])
 
   useEffect(() => { loadBatches() }, [])
 
@@ -77,11 +96,12 @@ export default function InternManagement() {
 
     // Debounce for text inputs
     const timer = setTimeout(() => {
-      load()
+      setSkip(0)
+      load(false)
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [user?.id, load])
+  }, [user?.id, nameFilter, emailFilter, techStackFilter, batchFilter, sortOption]) // Only reload on filter change
 
   async function createProfile(event) {
     event.preventDefault()
@@ -764,6 +784,17 @@ export default function InternManagement() {
               )}
             </tbody>
           </table>
+        )}
+
+        {hasMore && !loading && interns.length > 0 && (
+          <div className="p-4 border-t border-slate-100 text-center">
+            <button 
+              onClick={() => load(true)}
+              className="text-sm font-bold text-brand-700 hover:text-brand-800 transition-colors py-2 px-6 rounded-lg bg-brand-50 border border-brand-100"
+            >
+              Load More Interns
+            </button>
+          </div>
         )}
       </div>
     </div>

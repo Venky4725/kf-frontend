@@ -28,7 +28,8 @@ export default function SubmissionsView() {
   // Load interns and batches once on mount
   useEffect(() => {
     async function loadData() {
-      if (!user?.id) return
+      const userId = user?.id
+      if (!userId) return
       
       try {
         const [profiles, batchesRes] = await Promise.all([
@@ -51,7 +52,7 @@ export default function SubmissionsView() {
       }
     }
     loadData()
-  }, [user])
+  }, [user?.id, user?.role])
 
   // Load submissions after interns are loaded
   useEffect(() => {

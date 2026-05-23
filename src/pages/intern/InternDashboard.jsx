@@ -11,14 +11,15 @@ export default function InternDashboard() {
 
   useEffect(() => {
     async function load() {
-      if (!user?.id) return
+      const userId = user?.id
+      if (!userId) return
       
       try {
         setLoading(true)
         const requests = [
-          api.get('/submissions', { params: { user_id: user.id, limit: 200 } }),
-          api.get('/evaluations', { params: { intern_id: user.id, limit: 200 } }),
-          api.get('/notifications', { params: { user_id: user.id, limit: 200 } }),
+          api.get('/submissions', { params: { user_id: userId, limit: 200 } }),
+          api.get('/evaluations', { params: { intern_id: userId, limit: 200 } }),
+          api.get('/notifications', { params: { user_id: userId, limit: 200 } }),
         ]
         if (user.batch_id) {
           requests.unshift(api.get('/tasks', { params: { batch_id: user.batch_id, limit: 200 } }))
@@ -44,7 +45,7 @@ export default function InternDashboard() {
     }
 
     load()
-  }, [user])
+  }, [user?.id, user?.batch_id])
 
   const latestEvaluation = useMemo(() => data.evaluations[0] || null, [data.evaluations])
 

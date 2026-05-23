@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import React from 'react'
 
 import api from '../../lib/api'
@@ -65,7 +65,7 @@ export default function WeeklyPlans() {
   const [isParsing, setIsParsing] = useState(false)
   const [parseError, setParseError] = useState('')
   
-  // Updated Filter States
+  // Filter States
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [dateFilter, setDateFilter] = useState('')
@@ -80,30 +80,56 @@ export default function WeeklyPlans() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  // Parsing Logic
+  // Load static data once
+  const loadStaticData = useCallback(async () => {
+    if (staticLoaded) return
+    try {
+      const [batchList, profileList] = await Promise.all([
+        api.get('/batches', { params: { limit: 500 } }),
+        api.get('/profiles', { params: { limit: 500 } }),
+      ])
+      
+      const allProfiles = profileList.data || []
+      setBatches(batchList.data || [])
+      setAllUsers(allProfiles)
+      setInterns(allProfiles.filter(p => p.role === 'INTERN'))
+      setStaticLoaded(true)
+    } catch (err) {
+      console.error('❌ Failed to load static data:', err)
+    }
+  }, [staticLoaded])
+
+  const loadTasks = useCallback(async () => {
+    try {
+      const params = { limit: 500 }
+      if (selectedBatch) params.batch_id = selectedBatch
+      const { data } = await api.get('/tasks', { params })
+      setTasks(data || [])
+      setError('')
+    } catch (err) {
+      console.error('❌ Failed to load tasks:', err)
+      setError(getErrorMessage(err.response?.data?.detail || 'Failed to load tasks.'))
+      setTasks([])
+    }
+  }, [selectedBatch])
+
   useEffect(() => {
-    if (!bulkInput.trim()) {
-      setPreviewTasks([])
-      setParseError('')
-      return
-    }
+    loadStaticData()
+  }, [loadStaticData])
 
-    if (importMode === 'SIMPLE') {
-      const lines = bulkInput.split('\n').map(l => l.trim()).filter(l => l.length > 0)
-      const parsed = lines.map(line => ({
-        title: line,
-        description: form.description || '',
-        due_date: form.due_date || null
-      }))
-      setPreviewTasks(parsed)
-      setParseError('')
-    } else {
-      const timer = setTimeout(handleParseRoadmap, 1000)
-      return () => clearTimeout(timer)
-    }
-  }, [bulkInput, importMode])
+  useEffect(() => {
+    loadTasks()
+  }, [loadTasks])
+  
+  useEffect(() => {
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, loadTasks)
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, loadTasks)
+    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, loadTasks)
+    return () => { cleanupBatch(); cleanupTL(); cleanupIntern() }
+  }, [loadTasks])
 
-  async function handleParseRoadmap() {
+  // Roadmap Parsing
+  const handleParseRoadmap = useCallback(async () => {
     if (!bulkInput.trim() || importMode !== 'ROADMAP') return
     
     setIsParsing(true)
@@ -131,60 +157,34 @@ export default function WeeklyPlans() {
     } finally {
       setIsParsing(false)
     }
-  }
+  }, [bulkInput, importMode])
 
-  const filteredInterns = React.useMemo(() => {
+  useEffect(() => {
+    if (!bulkInput.trim()) {
+      setPreviewTasks([])
+      setParseError('')
+      return
+    }
+
+    if (importMode === 'SIMPLE') {
+      const lines = bulkInput.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+      const parsed = lines.map(line => ({
+        title: line,
+        description: form.description || '',
+        due_date: form.due_date || null
+      }))
+      setPreviewTasks(parsed)
+      setParseError('')
+    } else {
+      const timer = setTimeout(handleParseRoadmap, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [bulkInput, importMode, form.description, form.due_date, handleParseRoadmap])
+
+  const filteredInterns = useMemo(() => {
     if (!form.batch_id) return []
     return interns.filter(intern => String(intern.batch_id) === String(form.batch_id))
   }, [interns, form.batch_id])
-
-  // Load static data once
-  async function loadStaticData() {
-    if (staticLoaded) return
-    try {
-      const [batchList, profileList] = await Promise.all([
-        api.get('/batches', { params: { limit: 500 } }),
-        api.get('/profiles', { params: { limit: 500 } }),
-      ])
-      
-      const allProfiles = profileList.data || []
-      setBatches(batchList.data || [])
-      setAllUsers(allProfiles)
-      setInterns(allProfiles.filter(p => p.role === 'INTERN'))
-      setStaticLoaded(true)
-    } catch (err) {
-      console.error('❌ Failed to load static data:', err)
-    }
-  }
-
-  async function loadTasks() {
-    try {
-      const params = { limit: 500 }
-      if (selectedBatch) params.batch_id = selectedBatch
-      const { data } = await api.get('/tasks', { params })
-      setTasks(data || [])
-      setError('')
-    } catch (err) {
-      console.error('❌ Failed to load tasks:', err)
-      setError(getErrorMessage(err.response?.data?.detail || 'Failed to load tasks.'))
-      setTasks([])
-    }
-  }
-
-  useEffect(() => {
-    loadStaticData()
-  }, [])
-
-  useEffect(() => {
-    loadTasks()
-  }, [selectedBatch])
-  
-  useEffect(() => {
-    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, loadTasks)
-    const cleanupTL = onEvent(EVENTS.TL_UPDATED, loadTasks)
-    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, loadTasks)
-    return () => { cleanupBatch(); cleanupTL(); cleanupIntern() }
-  }, [])
 
   // Date Logic for Grouping
   const dateInfo = useMemo(() => {
@@ -196,6 +196,26 @@ export default function WeeklyPlans() {
     
     return { today: now, tomorrow }
   }, [])
+
+  const filteredTasks = useMemo(() => {
+    let result = [...tasks]
+
+    // 1. Search filter (Intern Name or Task Title)
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase()
+      result = result.filter(t => 
+        t.title.toLowerCase().includes(q) || 
+        (t.assigned_to_name && t.assigned_to_name.toLowerCase().includes(q))
+      )
+    }
+
+    // 2. Date Filter
+    if (dateFilter) {
+      result = result.filter(t => t.due_date === dateFilter)
+    }
+
+    return result
+  }, [tasks, debouncedSearch, dateFilter])
 
   const { normalTasks, roadmapTasks } = useMemo(() => {
     const normal = []
@@ -321,7 +341,6 @@ export default function WeeklyPlans() {
       if (isBulk) {
         if (previewTasks.length === 0) { setError('No tasks to create.'); setLoading(false); return }
         
-        // Prepare payload for bulk creation with explicit string casting and defaults
         const payload = {
           batch_id: String(form.batch_id || ""),
           assigned_to: form.assigned_to ? String(form.assigned_to) : null,
@@ -333,8 +352,6 @@ export default function WeeklyPlans() {
             status: String(t.status || "PENDING")
           }))
         }
-
-        console.log('🚀 Bulk Task Payload:', payload)
 
         const res = await api.post('/tasks/bulk', payload)
         setBulkInput(''); setPreviewTasks([]); setForm(EMPTY_FORM)
@@ -349,13 +366,11 @@ export default function WeeklyPlans() {
           assigned_to: form.assigned_to ? String(form.assigned_to) : null 
         }
         
-        console.log('🚀 Single Task Payload:', payload)
-        
         await api.post('/tasks', payload)
         setForm(EMPTY_FORM)
         setSuccess('Task created successfully!')
       }
-      setTimeout(() => setSuccess(''), 3000); load()
+      setTimeout(() => setSuccess(''), 3000); loadTasks()
     } catch (err) {
       console.error('Failed to create task:', err)
       setError(getErrorMessage(err.response?.data?.detail || 'Failed to create task.'))
@@ -365,7 +380,7 @@ export default function WeeklyPlans() {
   async function saveTask(id) {
     try {
       await api.put(`/tasks/${id}`, editingForm)
-      setEditingId(null); setError(''); load()
+      setEditingId(null); setError(''); loadTasks()
     } catch (err) {
       setError(getErrorMessage(err.response?.data?.detail || 'Failed to update task.'))
     }
@@ -375,7 +390,7 @@ export default function WeeklyPlans() {
     if (!window.confirm('Delete this task?')) return
     try {
       await api.delete(`/tasks/${id}`)
-      setError(''); load()
+      setError(''); loadTasks()
     } catch (err) {
       setError(getErrorMessage(err.response?.data?.detail || 'Failed to delete task.'))
     }
@@ -404,7 +419,7 @@ export default function WeeklyPlans() {
       {error && <div className="card border border-rose-200 bg-rose-50 text-rose-700">{error}</div>}
       {success && <div className="card border border-green-200 bg-green-50 text-green-700">{success}</div>}
 
-      {/* 1. Create New Task Form (Single Task only for direct form) */}
+      {/* 1. Create New Task Form */}
       {!isBulk && (
         <form onSubmit={createTask} className="card space-y-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
@@ -688,4 +703,3 @@ export default function WeeklyPlans() {
     </div>
   )
 }
-

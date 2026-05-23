@@ -160,11 +160,15 @@ export default function EvaluationsPage() {
   }
 
   useEffect(() => {
-    load()
-  }, [user])
+    if (user?.id) {
+      load()
+    }
+  }, [user?.id, user?.role])
   
   // Listen for batch/TL/intern updates from other pages
   useEffect(() => {
+    if (!user?.id) return
+    
     const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, () => {
       load() // Reload all data
     })
@@ -180,7 +184,7 @@ export default function EvaluationsPage() {
       cleanupTL()
       cleanupIntern()
     }
-  }, [user])
+  }, [user?.id])
 
   async function createEvaluation(event) {
     event.preventDefault()

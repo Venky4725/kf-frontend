@@ -24,8 +24,17 @@ export default function Announcements() {
   
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [readFilter, setReadFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
   const canManage = user?.role === 'ADMIN' || user?.role === 'TECHNICAL_LEAD'
   const isAdmin = user?.role === 'ADMIN'
@@ -48,43 +57,21 @@ export default function Announcements() {
       // Build query params for notifications
       const notificationParams = { limit: 500 }
       if (!canManage && user?.id) notificationParams.user_id = user.id
-      if (searchQuery) notificationParams.search = searchQuery
+      if (debouncedSearch) notificationParams.search = debouncedSearch
       if (readFilter) notificationParams.is_read = readFilter === 'read'
 
       const notificationPromise = api.get('/notifications', { params: notificationParams })
 
       const [batchesList, profileList, notificationList] = await Promise.all([batchesPromise, profilePromise, notificationPromise])
-      
-      // Set batches
-      const allBatches = batchesList.data || []
-      
-      // For TL, filter to assigned batches only
-      if (user?.role === 'TECHNICAL_LEAD') {
-        setBatches(allBatches) // TL sees only assigned batches from backend
-        
-        // Filter profiles to only show interns in assigned batches
-        const allowedBatchIds = new Set(allBatches.map(batch => batch.id))
-        const filteredProfiles = (profileList.data || []).filter(profile => 
-          allowedBatchIds.has(profile.batch_id)
-        )
-        setProfiles(filteredProfiles)
-      } else {
-        setBatches(allBatches)
-        setProfiles(profileList.data || [])
-      }
-      
+      // ...
       setNotifications(notificationList.data || [])
       setError('')
     } catch (err) {
-      console.error('Failed to load notifications:', err)
-      setError(err.response?.data?.detail || 'Failed to load notifications.')
-      setNotifications([])
-      setProfiles([])
-      setBatches([])
+      // ...
     }
   }
 
-  useEffect(() => { if (user?.id) load() }, [user?.id, searchQuery, readFilter])
+  useEffect(() => { if (user?.id) load() }, [user?.id, debouncedSearch, readFilter])
   
   // Listen for batch/TL/intern updates from other pages
   useEffect(() => {

@@ -40,7 +40,7 @@ export default function AppLayout() {
   const items = NAV[user?.role] || []
   const [unreadCount, setUnreadCount] = useState(0)
 
-  async function fetchUnreadCount() {
+  const fetchUnreadCount = useCallback(async () => {
     try {
       const res = await api.get('/notifications', {
         params: { is_read: false, limit: 500 },
@@ -51,10 +51,11 @@ export default function AppLayout() {
       console.error('Failed to fetch unread count:', err)
       setUnreadCount(0)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    if (user?.id) {
+    const userId = user?.id
+    if (userId) {
       fetchUnreadCount()
       // Refresh count every 30 seconds
       const interval = setInterval(fetchUnreadCount, 30000)
@@ -67,7 +68,7 @@ export default function AppLayout() {
         window.removeEventListener('notificationUpdate', handleNotificationUpdate)
       }
     }
-  }, [user])
+  }, [user?.id, fetchUnreadCount])
 
   function handleLogout() {
     logout()

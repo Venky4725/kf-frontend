@@ -11,7 +11,8 @@ export default function TLDashboard() {
 
   useEffect(() => {
     async function load() {
-      if (!user?.id) return
+      const userId = user?.id
+      if (!userId) return
       
       try {
         setLoading(true)
@@ -20,7 +21,7 @@ export default function TLDashboard() {
           api.get('/batches', { params: { limit: 500 } }),
           api.get('/profiles', { params: { role: 'INTERN', limit: 500 } }),
           api.get('/submissions', { params: { limit: 500 } }),
-          api.get('/evaluations', { params: { reviewed_by: user.id, limit: 500 } }),
+          api.get('/evaluations', { params: { reviewed_by: userId, limit: 500 } }),
         ])
 
         const tlBatchIds = new Set((batches.data || []).map((batch) => batch.id))
@@ -48,7 +49,7 @@ export default function TLDashboard() {
     }
 
     load()
-  }, [user])
+  }, [user?.id])
 
   if (loading) return <div className="text-slate-500">Loading dashboard...</div>
   if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700">{error}</div>

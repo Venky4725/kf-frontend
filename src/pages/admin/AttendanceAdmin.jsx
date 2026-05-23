@@ -51,7 +51,8 @@ export default function AttendanceAdmin() {
 
   // Load static data once
   const loadStaticData = useCallback(async () => {
-    if (!user?.id || staticLoaded) return
+    const userId = user?.id
+    if (!userId || staticLoaded) return
     
     setStaticLoading(true)
     try {
@@ -69,11 +70,12 @@ export default function AttendanceAdmin() {
     } finally {
       setStaticLoading(false)
     }
-  }, [user, staticLoaded])
+  }, [user?.id, staticLoaded])
 
   // Load dynamic attendance data
   const loadAttendance = useCallback(async () => {
-    if (!user?.id) return
+    const userId = user?.id
+    if (!userId) return
     
     setLoading(true)
     try {
@@ -92,7 +94,7 @@ export default function AttendanceAdmin() {
     } finally {
       setLoading(false)
     }
-  }, [user, searchQuery, batchFilter, dateFilter, statusFilter])
+  }, [user?.id, searchQuery, batchFilter, dateFilter, statusFilter])
 
   useEffect(() => {
     loadStaticData()

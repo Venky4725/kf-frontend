@@ -105,25 +105,22 @@ export default function AttendanceDashboard() {
   
   // Listen for batch/TL/intern updates from other pages
   React.useEffect(() => {
-    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, () => {
+    const handleUpdates = () => {
+      // Direct calls to load functions (they check user internally)
       loadStaticData()
       loadAttendanceData()
-    })
-    const cleanupTL = onEvent(EVENTS.TL_UPDATED, () => {
-      loadStaticData()
-      loadAttendanceData()
-    })
-    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, () => {
-      loadStaticData()
-      loadAttendanceData()
-    })
-    
+    }
+
+    const cleanupBatch = onEvent(EVENTS.BATCH_UPDATED, handleUpdates)
+    const cleanupTL = onEvent(EVENTS.TL_UPDATED, handleUpdates)
+    const cleanupIntern = onEvent(EVENTS.INTERN_UPDATED, handleUpdates)
+
     return () => {
       cleanupBatch()
       cleanupTL()
       cleanupIntern()
     }
-  }, [])
+  }, [loadStaticData, loadAttendanceData])
 
   // Create lookup maps for efficient data access
   const internMap = React.useMemo(() => {

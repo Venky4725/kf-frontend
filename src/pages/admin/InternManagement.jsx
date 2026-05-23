@@ -38,6 +38,9 @@ export default function InternManagement() {
   }
 
   const load = useCallback(async () => {
+    const userId = user?.id
+    if (!userId) return
+    
     setLoading(true)
     try {
       const params = {
@@ -56,38 +59,29 @@ export default function InternManagement() {
       if (sortOrder) params.sort_order = sortOrder
 
       const { data } = await api.get('/profiles', { params })
-      setInterns(data)
+      setInterns(data || [])
       setError('')
     } catch (err) {
       console.error('❌ Failed to load interns:', err)
-      
-      // Detect CORS/Network failures
-      if (!err.response) {
-        if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
-          setError('❌ Backend connection failed. Please check if the server is running and CORS is configured.')
-        } else if (err.message?.includes('CORS')) {
-          setError('❌ CORS error: Backend is blocking requests from this origin.')
-        } else {
-          setError('❌ Network error: Unable to reach the backend server.')
-        }
-      } else {
-        setError(err.response?.data?.detail || 'Failed to load intern profiles.')
-      }
+      setError(err.response?.data?.detail || 'Failed to load intern profiles.')
     } finally {
       setLoading(false)
     }
-  }, [nameFilter, emailFilter, techStackFilter, batchFilter, sortOption])
+  }, [user?.id, nameFilter, emailFilter, techStackFilter, batchFilter, sortOption])
 
   useEffect(() => { loadBatches() }, [])
 
   useEffect(() => {
+    const userId = user?.id
+    if (!userId) return
+
     // Debounce for text inputs
     const timer = setTimeout(() => {
       load()
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [load])
+  }, [user?.id, load])
 
   async function createProfile(event) {
     event.preventDefault()

@@ -37,6 +37,7 @@ const WeeklyPlans = lazy(() => import('./pages/admin/WeeklyPlans'))
 // Intern Pages
 const InternDashboard = lazy(() => import('./pages/intern/InternDashboard'))
 const MyScores = lazy(() => import('./pages/intern/MyScores'))
+const MyTasks = lazy(() => import('./pages/intern/MyTasks'))
 const MyUpdates = lazy(() => import('./pages/intern/MyUpdates'))
 
 // TL Pages
@@ -100,6 +101,7 @@ export default function App() {
 
               <Route path="/intern" element={<AR roles={['INTERN']}><InternDashboard /></AR>} />
               <Route path="/my-updates" element={<AR roles={['INTERN']}><MyUpdates /></AR>} />
+              <Route path="/my-tasks" element={<AR roles={['INTERN']}><MyTasks /></AR>} />
               <Route path="/my-scores" element={<AR roles={['INTERN']}><MyScores /></AR>} />
             </Route>
 

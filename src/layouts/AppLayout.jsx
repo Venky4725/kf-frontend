@@ -28,7 +28,8 @@ const NAV = {
   INTERN: [
     { to: '/intern', label: 'Dashboard' },
     { to: '/my-updates', label: 'My Updates' },
-    { to: '/my-scores', label: 'My Scores' },
+    { to: '/my-tasks', label: 'My Tasks' },
+    { to: '/my-scores', label: 'My Feedback' },
     { to: '/notifications', label: 'Notifications' },
   ],
 }

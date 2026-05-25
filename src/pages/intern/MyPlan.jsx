@@ -1,19 +1,49 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
+import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
+import WeeklyPlanViewer from '../../components/WeeklyPlanViewer'
+import RoadmapTaskCard, { isRoadmapTask } from '../../components/RoadmapTaskCard'
+
+const normalizeRole = (role = "") => 
+  (role || "").toLowerCase().replace(/[^a-z]/g, "");
 
 const DAY_NAMES = ['', 'Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6']
 
-function TaskList({ tasks }) {
-  if (!tasks || tasks.length === 0) {
+function TaskList({ tasks, userRole }) {
+  const filteredTasks = useMemo(() => {
+    if (!tasks) return []
+    return tasks.filter(t => {
+      // THE USER SAYS: USE task.role AS PRIMARY SOURCE
+      const taskRole = t.role || t.tech_stack
+      
+      // If task has no role assigned OR is explicitly GENERAL, it's for everyone in the batch
+      if (!taskRole || normalizeRole(taskRole) === "general") return true
+      
+      // Otherwise, must match intern's tech_stack
+      return normalizeRole(taskRole) === normalizeRole(userRole)
+    })
+  }, [tasks, userRole])
+
+  if (filteredTasks.length === 0) {
     return (
       <div className="text-xs text-slate-500 italic bg-slate-50 rounded p-3 border border-dashed border-slate-200">
-        No daily tasks have been added for this week yet. Check back soon or ask your TL.
+        No daily tasks have been added for your track this week yet. Check back soon or ask your TL.
       </div>
     )
   }
-  // Group by day_index so the daily breakdown is obvious
+
+  const { normalTasks, roadmapTasks } = filteredTasks.reduce((acc, t) => {
+    if (t.task_type === 'roadmap' || isRoadmapTask(t)) {
+      acc.roadmapTasks.push(t)
+    } else {
+      acc.normalTasks.push(t)
+    }
+    return acc
+  }, { normalTasks: [], roadmapTasks: [] })
+
+  // Group normal tasks by day_index
   const byDay = {}
-  for (const t of tasks) {
+  for (const t of normalTasks) {
     const k = t.day_index || 'unscheduled'
     if (!byDay[k]) byDay[k] = []
     byDay[k].push(t)
@@ -23,8 +53,15 @@ function TaskList({ tasks }) {
     if (b === 'unscheduled') return -1
     return Number(a) - Number(b)
   })
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
+      {roadmapTasks.length > 0 && (
+        <div className="mb-4">
+          <RoadmapTaskCard tasks={roadmapTasks} role={userRole} />
+        </div>
+      )}
+
       {orderedKeys.map(k => (
         <div key={k}>
           <div className="text-xs uppercase tracking-wider font-bold text-brand-700 mb-2">
@@ -50,6 +87,7 @@ function TaskList({ tasks }) {
 }
 
 export default function MyPlan() {
+  const { user } = useAuth()
   const [plan, setPlan] = useState(null)
   const [allPlans, setAllPlans] = useState([])
   const [projects, setProjects] = useState([])
@@ -135,10 +173,15 @@ export default function MyPlan() {
           </div>
 
           <div className="mt-5">
+            {plan.daily_plan && plan.daily_plan.length > 0 ? (
+              <div className="mb-6">
+                <WeeklyPlanViewer planData={plan.daily_plan} weekTitle={`Week ${plan.week_number} Plan`} />
+              </div>
+            ) : null}
             <div className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-3">
               📋 Daily Tasks ({plan.tasks?.length || 0})
             </div>
-            <TaskList tasks={plan.tasks} />
+            <TaskList tasks={plan.tasks} userRole={user?.tech_stack} />
           </div>
         </div>
       ) : (
@@ -246,7 +289,7 @@ export default function MyPlan() {
                         {p.description && (
                           <p className="text-sm text-slate-600 mb-3">{p.description}</p>
                         )}
-                        <TaskList tasks={p.tasks} />
+                        <TaskList tasks={p.tasks} userRole={user?.tech_stack} />
                       </div>
                     )}
                   </div>

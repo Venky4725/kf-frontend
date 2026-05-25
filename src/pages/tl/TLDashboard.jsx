@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
 import { onEvent, EVENTS } from '../../utils/events'
@@ -10,7 +11,7 @@ export default function TLDashboard() {
   
   // Independent states
   const [counts, setCounts] = useState(null)
-  const [summary, setSummary] = useState({ batches: [], recentSubmissions: [] })
+  const [summary, setSummary] = useState({ batches: [], recentSubmissions: [], recentEvaluations: [] })
   
   const [countsLoading, setCountsLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(true)
@@ -34,25 +35,29 @@ export default function TLDashboard() {
         // 2. Main lists
         api.get('/batches', { params: { limit: 500 }, signal }),
         api.get('/profiles', { params: { role: 'INTERN', limit: 500 }, signal }),
-        api.get('/submissions', { params: { limit: 5 }, signal }),
-        api.get('/evaluations', { params: { reviewed_by: userId, limit: 5 }, signal }),
+        api.get('/submissions', { params: { limit: 10 }, signal }),
+        api.get('/evaluations', { params: { reviewed_by: userId, limit: 10 }, signal }),
       ]
 
       const results = await Promise.allSettled(statsPromises)
       
-      // Process data results (indices 1, 2, 3)
+      // Process data results
       const batchesRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
       const internsRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
       const submissionsRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
+      const evaluationsRes = results[4].status === 'fulfilled' ? results[4].value : { data: [] }
 
       // Filter submissions for TL batches if not done by backend
       const tlBatchIds = new Set((batchesRes.data || []).map((b) => b.id))
       const tlInternIds = new Set((internsRes.data || []).filter(i => tlBatchIds.has(i.batch_id)).map(i => i.id))
       const tlSubmissions = (submissionsRes.data || []).filter(s => tlInternIds.has(s.user_id))
+      const tlEvaluations = evaluationsRes.data || []
 
       setSummary({
         batches: batchesRes.data || [],
-        recentSubmissions: tlSubmissions.slice(0, 5),
+        recentSubmissions: tlSubmissions,
+        recentEvaluations: tlEvaluations,
+        profileMap: Object.fromEntries((internsRes.data || []).map(i => [i.id, i]))
       })
       
       setDataLoading(false)
@@ -89,6 +94,20 @@ export default function TLDashboard() {
     return () => cleanups.forEach(fn => fn())
   }, [loadDashboard])
 
+  // Recent Submissions limited to 3 and sorted LIFO
+  const sortedSubmissions = useMemo(() => {
+    return [...summary.recentSubmissions]
+      .sort((a, b) => new Date(b.submitted_at || b.created_at || 0) - new Date(a.submitted_at || a.created_at || 0))
+      .slice(0, 3)
+  }, [summary.recentSubmissions])
+
+  // Recent Evaluations limited to 3 and sorted LIFO
+  const sortedEvaluations = useMemo(() => {
+    return [...summary.recentEvaluations]
+      .sort((a, b) => new Date(b.created_at || b.submitted_at || 0) - new Date(a.created_at || a.submitted_at || 0))
+      .slice(0, 3)
+  }, [summary.recentEvaluations])
+
   if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700 m-6">{error}</div>
 
   return (
@@ -108,7 +127,7 @@ export default function TLDashboard() {
         <Kpi label="Evaluations" value={counts?.evaluations} loading={countsLoading} />
       </section>
 
-      <section className="grid lg:grid-cols-2 gap-6">
+      <div className="grid lg:grid-cols-2 gap-6">
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">Assigned Batches</h2>
           <div className="space-y-3">
@@ -129,25 +148,77 @@ export default function TLDashboard() {
           </div>
         </div>
 
-        <div className="card">
-          <h2 className="text-lg font-semibold mb-4">Recent Submissions</h2>
-          <div className="space-y-3">
+        <div className="card flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Recent Submissions</h2>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Latest 3</span>
+          </div>
+          <div className="space-y-3 flex-1">
             {dataLoading ? <Skeleton h="150px" /> : (
               <>
-                {summary.recentSubmissions.length === 0 && (
+                {sortedSubmissions.length === 0 && (
                   <div className="text-sm text-slate-500">No intern submissions yet.</div>
                 )}
-                {summary.recentSubmissions.map((item) => (
+                {sortedSubmissions.map((item) => (
                   <div key={item.id} className="rounded-xl border border-slate-200 p-4">
-                    <div className="text-xs text-slate-400">{item.submitted_for}</div>
+                    <div className="flex justify-between items-start">
+                      <div className="text-xs text-slate-400">{item.submitted_for}</div>
+                      <div className="text-[10px] font-bold text-brand-600 uppercase">
+                        {summary.profileMap?.[item.user_id]?.name || 'Unknown'}
+                      </div>
+                    </div>
                     <div className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{item.content}</div>
                   </div>
                 ))}
               </>
             )}
           </div>
+          {counts?.submissions > 3 && (
+            <div className="flex justify-center pt-4">
+              <Link to="/submissions" className="text-xs font-semibold tracking-widest text-slate-400 hover:text-slate-600 transition">
+                VIEW MORE
+              </Link>
+            </div>
+          )}
         </div>
-      </section>
+      </div>
+
+      <div className="card flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Recent Evaluations</h2>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Latest 3</span>
+        </div>
+        <div className="space-y-3 flex-1">
+          {dataLoading ? <Skeleton h="150px" /> : (
+            <>
+              {sortedEvaluations.length === 0 && (
+                <div className="text-sm text-slate-500">No evaluations recorded yet.</div>
+              )}
+              {sortedEvaluations.map((item) => (
+                <div key={item.id} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="text-xs text-slate-400">Week {item.week_number}</div>
+                      <div className="font-bold text-slate-900 text-sm mt-1">
+                        {summary.profileMap?.[item.intern_id]?.name || 'Unknown'}
+                      </div>
+                    </div>
+                    <div className="text-xl font-black text-brand-700">{item.score}</div>
+                  </div>
+                  <div className="text-sm text-slate-600 mt-2 line-clamp-2">{item.feedback || 'No written feedback.'}</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+        {counts?.evaluations > 3 && (
+          <div className="flex justify-center pt-4">
+            <Link to="/evaluations" className="text-xs font-semibold tracking-widest text-slate-400 hover:text-slate-600 transition">
+              VIEW MORE
+            </Link>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

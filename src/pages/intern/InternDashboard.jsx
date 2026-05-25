@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
 import { onEvent, EVENTS } from '../../utils/events'
+import WeeklyPlanViewer from '../../components/WeeklyPlanViewer'
+import RoadmapTaskCard, { isRoadmapTask } from '../../components/RoadmapTaskCard'
+
+const normalizeRole = (role = "") => 
+  (role || "").toLowerCase().replace(/[^a-z]/g, "");
 
 export default function InternDashboard() {
   const { user } = useAuth()
@@ -38,21 +43,25 @@ export default function InternDashboard() {
       
       if (user.batch_id) {
         statsPromises.push(api.get('/tasks', { params: { batch_id: user.batch_id, limit: 5 }, signal }))
+        statsPromises.push(api.get('/plans/current', { signal }).catch(() => ({ data: null })))
       } else {
         statsPromises.push(Promise.resolve({ data: [] }))
+        statsPromises.push(Promise.resolve({ data: null }))
       }
 
       const results = await Promise.allSettled(statsPromises)
       
-      // Process data results (indices 1, 2, 3)
+      // Process data results (indices 1, 2, 3, 4)
       const submissionsRes = results[1].status === 'fulfilled' ? results[1].value : { data: [] }
       const evaluationsRes = results[2].status === 'fulfilled' ? results[2].value : { data: [] }
       const tasksRes = results[3].status === 'fulfilled' ? results[3].value : { data: [] }
+      const planRes = results[4].status === 'fulfilled' ? results[4].value : { data: null }
 
       setData({
-        tasks: (tasksRes.data || []).filter(t => !t.description?.startsWith('[ROADMAP]')),
+        tasks: tasksRes.data || [],
         submissions: submissionsRes.data || [],
         evaluations: evaluationsRes.data || [],
+        plan: planRes.data || null,
       })
       
       setDataLoading(false)
@@ -100,6 +109,30 @@ export default function InternDashboard() {
     }
   }, [counts, data])
 
+  const tasks = useMemo(() => {
+    const rawTasks = data.tasks || []
+    return rawTasks.filter(t => {
+      // THE USER SAYS: USE task.role AS PRIMARY SOURCE
+      const taskRole = t.role || t.tech_stack
+      
+      // If task has no role assigned OR is explicitly GENERAL, it's for everyone in the batch
+      if (!taskRole || normalizeRole(taskRole) === "general") return true
+      
+      // Otherwise, must match intern's tech_stack
+      return normalizeRole(taskRole) === normalizeRole(user?.tech_stack)
+    })
+  }, [data.tasks, user?.tech_stack])
+
+  const roadmapTasks = useMemo(() => 
+    tasks.filter(t => t.task_type === 'roadmap' || isRoadmapTask(t)),
+    [tasks]
+  )
+
+  const normalTasks = useMemo(() => 
+    tasks.filter(t => t.task_type !== 'roadmap' && !isRoadmapTask(t)),
+    [tasks]
+  )
+
   if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700 m-6">{error}</div>
 
   return (
@@ -119,14 +152,31 @@ export default function InternDashboard() {
         <Kpi label="Unread Alerts" value={displayCounts.unread_notifications} loading={countsLoading} />
       </section>
 
+      {/* Structured Roadmap Container */}
+      {roadmapTasks.length > 0 && (
+        <section>
+          <RoadmapTaskCard tasks={roadmapTasks} role={user?.tech_stack} />
+        </section>
+      )}
+
+      {/* Weekly Learning Plan */}
+      {data.plan?.daily_plan && data.plan.daily_plan.length > 0 && (
+        <section className="card">
+          <WeeklyPlanViewer 
+            planData={data.plan.daily_plan} 
+            weekTitle={`Week ${data.plan.week_number} Plan: ${data.plan.title}`} 
+          />
+        </section>
+      )}
+
       <section className="grid lg:grid-cols-2 gap-6">
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">Upcoming Tasks</h2>
           <div className="space-y-3">
             {dataLoading ? <Skeleton h="200px" /> : (
               <>
-                {data.tasks.length === 0 && <div className="text-sm text-slate-500">No tasks assigned yet.</div>}
-                {data.tasks.map((task) => (
+                {normalTasks.length === 0 && <div className="text-sm text-slate-500">No tasks assigned yet.</div>}
+                {normalTasks.map((task) => (
                   <div key={task.id} className="rounded-xl border border-slate-200 p-4">
                     <div className="font-semibold text-slate-900">{task.title}</div>
                     <div className="text-sm text-slate-600 mt-1 truncate">{task.description || 'No description provided.'}</div>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import api from '../../lib/api'
 import { onEvent, EVENTS } from '../../utils/events'
 
@@ -31,9 +32,9 @@ export default function AdminDashboard() {
         // Index 2: Batches
         api.get('/batches', { params: { limit: 500 }, signal }),
         // Index 3: Submissions
-        api.get('/submissions', { params: { limit: 5 }, signal }),
+        api.get('/submissions', { params: { limit: 10 }, signal }),
         // Index 4: Evaluations
-        api.get('/evaluations', { params: { limit: 5 }, signal }),
+        api.get('/evaluations', { params: { limit: 10 }, signal }),
       ]
 
       const results = await Promise.allSettled(statsPromises)
@@ -117,6 +118,20 @@ export default function AdminDashboard() {
     }
   }, [counts, recentData.profileMap, recentData.batchMap])
 
+  // Recent Submissions limited to 3 and sorted LIFO
+  const sortedSubmissions = useMemo(() => {
+    return [...recentData.submissions]
+      .sort((a, b) => new Date(b.submitted_at || b.created_at || 0) - new Date(a.submitted_at || a.created_at || 0))
+      .slice(0, 3)
+  }, [recentData.submissions])
+
+  // Recent Evaluations limited to 3 and sorted LIFO
+  const sortedEvaluations = useMemo(() => {
+    return [...recentData.evaluations]
+      .sort((a, b) => new Date(b.created_at || b.submitted_at || 0) - new Date(a.created_at || a.submitted_at || 0))
+      .slice(0, 3)
+  }, [recentData.evaluations])
+
   if (error) return <div className="card border border-rose-200 bg-rose-50 text-rose-700 m-6">{error}</div>
 
   return (
@@ -170,25 +185,33 @@ export default function AdminDashboard() {
         </div>
 
         {/* Recent Submissions */}
-        <div className="card">
-          <h2 className="text-lg font-semibold mb-4">Recent Submissions</h2>
-          <div className="space-y-3">
-            {loading && recentData.submissions.length === 0 ? <Skeleton h="150px" /> : (
+        <div className="card flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Recent Submissions</h2>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Latest 3</span>
+          </div>
+          <div className="space-y-3 flex-1">
+            {loading && sortedSubmissions.length === 0 ? <Skeleton h="150px" /> : (
               <>
-                {recentData.submissions.length === 0 && (
+                {sortedSubmissions.length === 0 && (
                   <div className="text-sm text-slate-500">No submissions yet.</div>
                 )}
-                {recentData.submissions.map((submission) => {
+                {sortedSubmissions.map((submission) => {
                   const internProfile = recentData.profileMap[submission.intern_id]
                   const batchName = submission.batch_name ?? recentData.batchMap[submission.batch_id]?.name ?? 'N/A'
-                  const internName = internProfile?.name ?? submission.intern_name ?? 'Unknown'
+                  const internName = submission.submitted_by_name ?? submission.user?.name ?? internProfile?.name ?? submission.intern_name ?? submission.intern?.name ?? 'Unknown'
                   
                   return (
                     <div key={submission.id} className="flex items-start justify-between gap-4 pb-3 border-b border-slate-100 last:border-b-0">
                       <div className="flex-1">
-                        <p className="font-medium text-slate-900">{batchName}</p>
-                        <p className="text-sm text-slate-600">{internName}</p>
-                        <p className="text-xs text-slate-400 mt-1">{submission.submitted_for}</p>
+                        <div className="flex items-center justify-between">
+                          <p className="font-bold text-slate-900 text-sm">{internName}</p>
+                          <span className="text-[10px] font-black text-brand-500 uppercase">{batchName}</span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-0.5">{submission.submitted_for}</p>
+                        <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-tighter">
+                          {submission.submitted_at ? new Date(submission.submitted_at).toLocaleString() : 'Just now'}
+                        </p>
                       </div>
                     </div>
                   )
@@ -196,45 +219,64 @@ export default function AdminDashboard() {
               </>
             )}
           </div>
+          {displayCounts.submissions > 3 && (
+            <div className="flex justify-center pt-4">
+              <Link to="/submissions" className="text-xs font-semibold tracking-widest text-slate-400 hover:text-slate-600 transition">
+                VIEW MORE
+              </Link>
+            </div>
+          )}
         </div>
       </section>
 
       {/* Evaluations Table */}
       <section className="card">
-        <h2 className="text-lg font-semibold mb-4">Latest Evaluations</h2>
-        {loading && recentData.evaluations.length === 0 ? <Skeleton h="200px" /> : (
-          recentData.evaluations.length === 0 ? (
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Recent Evaluations</h2>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Latest 3</span>
+        </div>
+        {loading && sortedEvaluations.length === 0 ? <Skeleton h="200px" /> : (
+          sortedEvaluations.length === 0 ? (
             <div className="text-sm text-slate-500">No evaluations recorded yet.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="th">Batch</th>
-                    <th className="th">Intern Name</th>
-                    <th className="th">Week</th>
-                    <th className="th">Score</th>
-                    <th className="th">Feedback</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {recentData.evaluations.map((item) => {
-                    const profile = recentData.profileMap[item.intern_id]
-                    const batchName = recentData.batchMap[profile?.batch_id]?.name ?? 'N/A'
-                    const internName = profile?.name || item.intern_id
-                    return (
-                      <tr key={item.id}>
-                        <td className="td">{batchName}</td>
-                        <td className="td">{internName}</td>
-                        <td className="td">{item.week_number}</td>
-                        <td className="td font-semibold">{item.score}</td>
-                        <td className="td text-slate-600 text-sm truncate max-w-xs">{item.feedback || '—'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="th">Batch</th>
+                      <th className="th">Intern Name</th>
+                      <th className="th">Week</th>
+                      <th className="th">Score</th>
+                      <th className="th">Feedback</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {sortedEvaluations.map((item) => {
+                      const profile = recentData.profileMap[item.intern_id]
+                      const batchName = recentData.batchMap[profile?.batch_id]?.name ?? 'N/A'
+                      const internName = profile?.name || item.intern_id
+                      return (
+                        <tr key={item.id}>
+                          <td className="td">{batchName}</td>
+                          <td className="td">{internName}</td>
+                          <td className="td">{item.week_number}</td>
+                          <td className="td font-semibold">{item.score}</td>
+                          <td className="td text-slate-600 text-sm truncate max-w-xs">{item.feedback || '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {displayCounts.evaluations > 3 && (
+                <div className="flex justify-center pt-4">
+                  <Link to="/evaluations" className="text-xs font-semibold tracking-widest text-slate-400 hover:text-slate-600 transition">
+                    VIEW MORE
+                  </Link>
+                </div>
+              )}
+            </>
           )
         )}
       </section>

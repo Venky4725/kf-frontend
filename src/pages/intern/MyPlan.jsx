@@ -32,14 +32,34 @@ function TaskList({ tasks, userRole }) {
     )
   }
 
-  const { normalTasks, roadmapTasks } = filteredTasks.reduce((acc, t) => {
-    if (t.task_type === 'roadmap' || isRoadmapTask(t)) {
-      acc.roadmapTasks.push(t)
-    } else {
-      acc.normalTasks.push(t)
-    }
-    return acc
-  }, { normalTasks: [], roadmapTasks: [] })
+  const { normalTasks, roadmapTasks } = useMemo(() => {
+    return filteredTasks.reduce((acc, t) => {
+      if (t.task_type === 'roadmap' || isRoadmapTask(t)) {
+        acc.roadmapTasks.push(t)
+      } else {
+        acc.normalTasks.push(t)
+      }
+      return acc
+    }, { normalTasks: [], roadmapTasks: [] })
+  }, [filteredTasks])
+
+  const groupedRoadmapTasks = useMemo(() => {
+    const groups = {}
+    roadmapTasks.forEach(task => {
+      const rawRole = task.role || task.tech_stack
+      const norm = normalizeRole(rawRole)
+      let displayRole = "GENERAL"
+      if (norm && norm !== "general") {
+        displayRole = rawRole?.trim()?.toUpperCase() || "UNSPECIFIED"
+      }
+      const key = `${task.batch_id}_${norm}`
+      if (!groups[key]) {
+        groups[key] = { batch_id: task.batch_id, role: displayRole, tasks: [] }
+      }
+      groups[key].tasks.push(task)
+    })
+    return Object.values(groups)
+  }, [roadmapTasks])
 
   // Group normal tasks by day_index
   const byDay = {}
@@ -56,9 +76,15 @@ function TaskList({ tasks, userRole }) {
 
   return (
     <div className="space-y-6">
-      {roadmapTasks.length > 0 && (
-        <div className="mb-4">
-          <RoadmapTaskCard tasks={roadmapTasks} role={userRole} />
+      {groupedRoadmapTasks.length > 0 && (
+        <div className="space-y-4 mb-4">
+          {groupedRoadmapTasks.map((group, idx) => (
+            <RoadmapTaskCard 
+              key={`${group.batch_id}_${group.role}_${idx}`}
+              tasks={group.tasks} 
+              role={group.role} 
+            />
+          ))}
         </div>
       )}
 

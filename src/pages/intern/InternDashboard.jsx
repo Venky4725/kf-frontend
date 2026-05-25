@@ -128,6 +128,24 @@ export default function InternDashboard() {
     [tasks]
   )
 
+  const groupedRoadmapTasks = useMemo(() => {
+    const groups = {}
+    roadmapTasks.forEach(task => {
+      const rawRole = task.role || task.tech_stack
+      const norm = normalizeRole(rawRole)
+      let displayRole = "GENERAL"
+      if (norm && norm !== "general") {
+        displayRole = rawRole?.trim()?.toUpperCase() || "UNSPECIFIED"
+      }
+      const key = `${task.batch_id}_${norm}`
+      if (!groups[key]) {
+        groups[key] = { batch_id: task.batch_id, role: displayRole, tasks: [] }
+      }
+      groups[key].tasks.push(task)
+    })
+    return Object.values(groups)
+  }, [roadmapTasks])
+
   const normalTasks = useMemo(() => 
     tasks.filter(t => t.task_type !== 'roadmap' && !isRoadmapTask(t)),
     [tasks]
@@ -153,9 +171,15 @@ export default function InternDashboard() {
       </section>
 
       {/* Structured Roadmap Container */}
-      {roadmapTasks.length > 0 && (
-        <section>
-          <RoadmapTaskCard tasks={roadmapTasks} role={user?.tech_stack} />
+      {groupedRoadmapTasks.length > 0 && (
+        <section className="space-y-4">
+          {groupedRoadmapTasks.map((group, idx) => (
+            <RoadmapTaskCard 
+              key={`${group.batch_id}_${group.role}_${idx}`}
+              tasks={group.tasks} 
+              role={group.role} 
+            />
+          ))}
         </section>
       )}
 

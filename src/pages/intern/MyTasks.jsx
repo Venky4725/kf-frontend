@@ -94,6 +94,31 @@ export default function MyTasks() {
     return { roadmapTasks: roadmap, normalTasks: normal }
   }, [filteredTasks])
 
+  const groupedRoadmapTasks = useMemo(() => {
+    const groups = {}
+    roadmapTasks.forEach(task => {
+      const rawRole = task.role || task.tech_stack
+      const norm = normalizeRole(rawRole)
+      // Display role logic: if empty or general, show GENERAL. Otherwise use cleaned up original or uppercase
+      let displayRole = "GENERAL"
+      if (norm && norm !== "general") {
+        displayRole = rawRole?.trim()?.toUpperCase() || "UNSPECIFIED"
+      }
+
+      const key = `${task.batch_id}_${norm}`
+      
+      if (!groups[key]) {
+        groups[key] = {
+          batch_id: task.batch_id,
+          role: displayRole,
+          tasks: []
+        }
+      }
+      groups[key].tasks.push(task)
+    })
+    return Object.values(groups)
+  }, [roadmapTasks])
+
   const groupedNormalTasks = useMemo(() => {
     const groups = {}
     normalTasks.forEach(task => {
@@ -158,18 +183,21 @@ export default function MyTasks() {
         ) : (
           <>
             {/* Roadmap Tasks */}
-            {roadmapTasks.length > 0 && (
+            {groupedRoadmapTasks.length > 0 && (
               <div className="space-y-4">
                 <div className="flex items-center gap-4">
                   <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">Training Roadmap</h3>
                   <div className="h-px w-full bg-slate-200"></div>
                 </div>
-                <RoadmapTaskCard 
-                  tasks={roadmapTasks} 
-                  role={user?.tech_stack}
-                  expanded={roadmapExpanded}
-                  onToggle={() => setRoadmapExpanded(!roadmapExpanded)}
-                />
+                {groupedRoadmapTasks.map((group, idx) => (
+                  <RoadmapTaskCard 
+                    key={`${group.batch_id}_${group.role}_${idx}`}
+                    tasks={group.tasks} 
+                    role={group.role}
+                    expanded={roadmapExpanded}
+                    onToggle={() => setRoadmapExpanded(!roadmapExpanded)}
+                  />
+                ))}
               </div>
             )}
 

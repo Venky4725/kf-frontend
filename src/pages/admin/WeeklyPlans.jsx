@@ -297,15 +297,20 @@ export default function WeeklyPlans() {
     const groups = {}
     roadmapTasks.forEach(task => {
       // THE USER SAYS: USE task.role AS PRIMARY SOURCE
-      const role = task.role || task.tech_stack || "GENERAL"
+      const rawRole = task.role || task.tech_stack
+      const norm = normalizeRole(rawRole)
+      let displayRole = "GENERAL"
+      if (norm && norm !== "general") {
+        displayRole = rawRole?.trim()?.toUpperCase() || "UNSPECIFIED"
+      }
       
       // GROUP USING batch_id + role
-      const key = `${task.batch_id}_${role}`
+      const key = `${task.batch_id}_${norm}`
       
       if (!groups[key]) {
         groups[key] = { 
           batch_id: task.batch_id, 
-          role: role, 
+          role: displayRole, 
           tasks: [] 
         }
       }

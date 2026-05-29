@@ -10,6 +10,7 @@ export const EVENTS = {
   INTERN_UPDATED: 'internUpdated',
   TASK_UPDATED: 'taskUpdated',
   EVALUATION_UPDATED: 'evaluationUpdated',
+  SUBMISSION_UPDATED: 'submissionUpdated',
   NOTIFICATION_UPDATED: 'notificationUpdated',
 }
 
@@ -72,6 +73,13 @@ export function emitTaskUpdate() {
  */
 export function emitEvaluationUpdate() {
   emitEvent(EVENTS.EVALUATION_UPDATED)
+}
+
+/**
+ * Emit submission update event
+ */
+export function emitSubmissionUpdate() {
+  emitEvent(EVENTS.SUBMISSION_UPDATED)
 }
 
 /**

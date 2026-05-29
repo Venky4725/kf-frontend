@@ -137,6 +137,7 @@ export default function SubmissionsView() {
       
       // Refresh current view
       setSubmissions(prev => prev.filter(s => s.id !== id))
+      emitSubmissionUpdate()
     } catch (err) {
       console.error('Failed to delete submission:', err)
       setError(err.response?.data?.detail || 'Failed to delete submission.')
@@ -267,6 +268,10 @@ export default function SubmissionsView() {
           </>
         )}
       </div>
+    </div>
+  )
+}
+ </div>
     </div>
   )
 }

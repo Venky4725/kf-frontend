@@ -27,16 +27,23 @@ export default function TLDashboard() {
     try {
       const statsPromises = [
         // 1. Specialized Counts for TL (scoped by backend automatically)
-        api.get('/dashboard/stats/counts', { signal })
-          .then(res => { setCounts(res.data) })
+        api.get('/dashboard/stats/counts', { params: { _t: Date.now() }, signal })
+          .then(res => { 
+            console.log('API response:', res.data);
+            console.log('assigned_batches_count:', res.data?.batches);
+            console.log('interns_count:', res.data?.interns);
+            console.log('submissions_count:', res.data?.submissions);
+            console.log('evaluations_count:', res.data?.evaluations);
+            setCounts(res.data);
+          })
           .catch(err => console.error('TL Counts error:', err))
           .finally(() => setCountsLoading(false)),
 
         // 2. Main lists
-        api.get('/batches', { params: { limit: 500 }, signal }),
-        api.get('/profiles', { params: { role: 'INTERN', limit: 500 }, signal }),
-        api.get('/submissions', { params: { limit: 10 }, signal }),
-        api.get('/evaluations', { params: { reviewed_by: userId, limit: 10 }, signal }),
+        api.get('/batches', { params: { limit: 500, _t: Date.now() }, signal }),
+        api.get('/profiles', { params: { role: 'INTERN', limit: 500, _t: Date.now() }, signal }),
+        api.get('/submissions', { params: { limit: 10, _t: Date.now() }, signal }),
+        api.get('/evaluations', { params: { reviewed_by: userId, limit: 10, _t: Date.now() }, signal }),
       ]
 
       const results = await Promise.allSettled(statsPromises)
@@ -89,6 +96,7 @@ export default function TLDashboard() {
       onEvent(EVENTS.INTERN_UPDATED, refresh),
       onEvent(EVENTS.TASK_UPDATED, refresh),
       onEvent(EVENTS.EVALUATION_UPDATED, refresh),
+      onEvent(EVENTS.SUBMISSION_UPDATED, refresh),
     ]
     
     return () => cleanups.forEach(fn => fn())

@@ -250,6 +250,7 @@ export default function EvaluationsPage() {
       await api.put(`/evaluations/${editingEvaluation.id}`, payload)
       closeEditModal()
       load() // refresh the list
+      emitEvaluationUpdate()
     } catch (err) {
       console.error('Failed to update evaluation:', err)
       setEditError(err.response?.data?.detail || 'Failed to update evaluation.')

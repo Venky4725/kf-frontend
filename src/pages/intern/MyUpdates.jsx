@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../../hooks/AuthContext'
 import api from '../../lib/api'
 import RoadmapTaskCard, { isRoadmapTask } from '../../components/RoadmapTaskCard'
+import { emitSubmissionUpdate } from '../../utils/events'
 
 export default function MyUpdates() {
   const { user } = useAuth()
@@ -44,6 +45,7 @@ export default function MyUpdates() {
       setForm({ ...form, content: '' })
       setMessage('Update submitted successfully.')
       load()
+      emitSubmissionUpdate()
     } catch (err) {
       console.error('Failed to submit update:', err)
       setMessage(err.response?.data?.detail || 'Failed to submit update.')
@@ -57,6 +59,7 @@ export default function MyUpdates() {
       await api.delete(`/submissions/${id}`)
       setMessage('Submission deleted successfully.')
       load()
+      emitSubmissionUpdate()
     } catch (err) {
       console.error('Failed to delete submission:', err)
       if (err.response?.status === 403) {

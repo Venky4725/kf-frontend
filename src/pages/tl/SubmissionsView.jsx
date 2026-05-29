@@ -271,7 +271,4 @@ export default function SubmissionsView() {
     </div>
   )
 }
- </div>
-    </div>
-  )
-}
+  

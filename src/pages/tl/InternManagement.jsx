@@ -373,7 +373,7 @@ export default function InternManagement() {
           />
           <input
             className="input"
-            placeholder="Tech Stack"
+            placeholder="Tech Stack (e.g., Python Full Stack, MERN Stack)"
             value={createForm.tech_stack}
             onChange={(e) => setCreateForm({ ...createForm, tech_stack: e.target.value })}
           />
@@ -574,6 +574,7 @@ export default function InternManagement() {
                       {editingId === item.id ? (
                         <input 
                           className="input" 
+                          placeholder="e.g., Python Full Stack, MERN Stack"
                           value={editingForm.tech_stack || ''} 
                           onChange={(e) => setEditingForm({ ...editingForm, tech_stack: e.target.value })} 
                         />

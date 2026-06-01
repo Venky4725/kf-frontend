@@ -7,20 +7,42 @@ import RoadmapTaskCard, { isRoadmapTask } from '../../components/RoadmapTaskCard
 const normalizeRole = (role = "") => 
   (role || "").toLowerCase().replace(/[^a-z]/g, "");
 
+// Map normalized roles to filter categories
+const getRoleCategory = (techStack = "") => {
+  const normalized = normalizeRole(techStack);
+  
+  // AI/ML variations
+  if (normalized.includes('ai') || normalized.includes('ml') || 
+      normalized.includes('data') || normalized.includes('science')) {
+    return 'aiml';
+  }
+  
+  // FULLSTACK variations (Python, MERN, Java, etc.)
+  if (normalized.includes('full') || normalized.includes('stack') || 
+      normalized.includes('python') || normalized.includes('mern') || 
+      normalized.includes('java') || normalized.includes('web')) {
+    return 'fullstack';
+  }
+  
+  // Default to general
+  return 'general';
+};
+
 const DAY_NAMES = ['', 'Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6']
 
 function TaskList({ tasks, userRole }) {
   const filteredTasks = useMemo(() => {
     if (!tasks) return []
     return tasks.filter(t => {
-      // THE USER SAYS: USE task.role AS PRIMARY SOURCE
       const taskRole = t.role || t.tech_stack
+      const taskCategory = getRoleCategory(taskRole);
       
-      // If task has no role assigned OR is explicitly GENERAL, it's for everyone in the batch
-      if (!taskRole || normalizeRole(taskRole) === "general") return true
+      // If task has no role assigned OR is GENERAL category, it's for everyone in the batch
+      if (!taskRole || taskCategory === "general") return true
       
-      // Otherwise, must match intern's tech_stack
-      return normalizeRole(taskRole) === normalizeRole(userRole)
+      // Otherwise, must match intern's tech_stack category
+      const userCategory = getRoleCategory(userRole);
+      return taskCategory === userCategory;
     })
   }, [tasks, userRole])
 

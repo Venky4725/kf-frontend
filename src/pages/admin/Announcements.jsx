@@ -48,6 +48,7 @@ export default function Announcements() {
 
   async function load() {
     try {
+      console.log('📥 [Announcements] Loading data...')
       const batchesPromise = api.get('/batches', { params: { limit: 500 } })
       
       const profilePromise = canManage
@@ -63,7 +64,14 @@ export default function Announcements() {
       const notificationPromise = api.get('/notifications', { params: notificationParams })
 
       const [batchesList, profileList, notificationList] = await Promise.all([batchesPromise, profilePromise, notificationPromise])
-      // ...
+      
+      console.log('📦 [Announcements] API Response:')
+      console.log('  Batches:', batchesList.data?.length || 0, batchesList.data)
+      console.log('  Profiles:', profileList.data?.length || 0)
+      console.log('  Notifications:', notificationList.data?.length || 0)
+      
+      setBatches(batchesList.data || [])
+      setProfiles(profileList.data || [])
       setNotifications(notificationList.data || [])
       setError('')
     } catch (err) {

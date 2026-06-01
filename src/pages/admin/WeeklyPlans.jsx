@@ -43,6 +43,27 @@ function TaskDescription({ text }) {
 const normalizeRole = (role = "") => 
   (role || "").toLowerCase().replace(/[^a-z]/g, "");
 
+// Map normalized roles to filter categories
+const getRoleCategory = (techStack = "") => {
+  const normalized = normalizeRole(techStack);
+  
+  // AI/ML variations
+  if (normalized.includes('ai') || normalized.includes('ml') || 
+      normalized.includes('data') || normalized.includes('science')) {
+    return 'aiml';
+  }
+  
+  // FULLSTACK variations (Python, MERN, Java, etc.)
+  if (normalized.includes('full') || normalized.includes('stack') || 
+      normalized.includes('python') || normalized.includes('mern') || 
+      normalized.includes('java') || normalized.includes('web')) {
+    return 'fullstack';
+  }
+  
+  // Default to general
+  return 'general';
+};
+
 export default function WeeklyPlans() {
   const { user } = useAuth()
   const [tasks, setTasks] = useState([])
@@ -84,15 +105,32 @@ export default function WeeklyPlans() {
   const loadStaticData = useCallback(async () => {
     if (staticLoaded) return
     try {
+      console.log('📥 Loading static data (batches & interns)...')
       const [batchList, profileList] = await Promise.all([
         api.get('/batches', { params: { limit: 500 } }),
         api.get('/profiles', { params: { limit: 500 } }),
       ])
+      
+      console.log('📦 API Response - Batches:', batchList.data?.length || 0)
+      console.log('📦 API Response - Profiles:', profileList.data?.length || 0)
+      
+      const allInterns = (profileList.data || []).filter(p => p.role === 'INTERN')
+      console.log('👥 Total Interns:', allInterns.length)
+      
+      // Group interns by tech_stack to see distribution
+      const techStackGroups = {}
+      allInterns.forEach(intern => {
+        const stack = intern.tech_stack || 'NONE'
+        if (!techStackGroups[stack]) techStackGroups[stack] = []
+        techStackGroups[stack].push(intern.name)
+      })
+      console.log('📊 Interns by tech_stack:', techStackGroups)
+      
       setBatches(batchList.data || [])
-      setInterns((profileList.data || []).filter(p => p.role === 'INTERN'))
+      setInterns(allInterns)
       setStaticLoaded(true)
     } catch (err) {
-      console.error('Failed to load static data:', err)
+      console.error('❌ Failed to load static data:', err)
     }
   }, [staticLoaded])
 
@@ -192,10 +230,34 @@ export default function WeeklyPlans() {
 
   const filteredInterns = useMemo(() => {
     if (!form.batch_id) return []
+    
+    console.log('🔍 FILTERING INTERNS:')
+    console.log('  Selected Batch:', form.batch_id)
+    console.log('  Selected Role (from dropdown):', form.tech_stack)
+    console.log('  Total Interns:', interns.length)
+    
     let result = interns.filter(intern => String(intern.batch_id) === String(form.batch_id))
+    console.log('  After Batch Filter:', result.length, 'interns')
+    
     if (form.tech_stack) {
-      result = result.filter(intern => normalizeRole(intern.tech_stack) === normalizeRole(form.tech_stack))
+      const selectedCategory = getRoleCategory(form.tech_stack);
+      console.log('  Selected Role Category:', selectedCategory)
+      
+      // Log each intern's tech_stack before filtering
+      result.forEach(intern => {
+        const internCategory = getRoleCategory(intern.tech_stack);
+        console.log(`    Intern: ${intern.name}, tech_stack: "${intern.tech_stack}", category: "${internCategory}"`)
+      })
+      
+      result = result.filter(intern => {
+        const internCategory = getRoleCategory(intern.tech_stack);
+        return internCategory === selectedCategory;
+      })
+      console.log('  After Role Filter:', result.length, 'interns')
     }
+    
+    console.log('  Final Filtered Interns:', result.map(i => ({ name: i.name, tech_stack: i.tech_stack })))
+    
     return result
   }, [interns, form.batch_id, form.tech_stack])
 
@@ -208,9 +270,13 @@ export default function WeeklyPlans() {
       result = result.filter(t => String(t.batch_id) === String(selectedBatch))
     }
 
-    // 2. Role Filter
+    // 2. Role Filter - use category matching
     if (selectedRole) {
-      result = result.filter(t => normalizeRole(t.role || t.tech_stack || "GENERAL") === normalizeRole(selectedRole))
+      const selectedCategory = getRoleCategory(selectedRole);
+      result = result.filter(t => {
+        const taskCategory = getRoleCategory(t.role || t.tech_stack || "GENERAL");
+        return taskCategory === selectedCategory || taskCategory === 'general';
+      })
     }
 
     // 3. Date Filter & Roadmap logic
@@ -296,21 +362,24 @@ export default function WeeklyPlans() {
   const groupedRoadmapTasks = useMemo(() => {
     const groups = {}
     roadmapTasks.forEach(task => {
-      // THE USER SAYS: USE task.role AS PRIMARY SOURCE
+      // Preserve original tech_stack for display
       const rawRole = task.role || task.tech_stack
-      const norm = normalizeRole(rawRole)
+      const category = getRoleCategory(rawRole)
+      
+      // Display role logic: preserve original or show GENERAL
       let displayRole = "GENERAL"
-      if (norm && norm !== "general") {
-        displayRole = rawRole?.trim()?.toUpperCase() || "UNSPECIFIED"
+      if (rawRole && category !== "general") {
+        displayRole = rawRole.trim() // Preserve original: "Python Full Stack", "MERN Stack", etc.
       }
       
-      // GROUP USING batch_id + role
-      const key = `${task.batch_id}_${norm}`
+      // GROUP USING batch_id + category (not raw role)
+      const key = `${task.batch_id}_${category}`
       
       if (!groups[key]) {
         groups[key] = { 
           batch_id: task.batch_id, 
-          role: displayRole, 
+          role: displayRole, // Display original value
+          category: category, // Internal category for filtering
           tasks: [] 
         }
       }

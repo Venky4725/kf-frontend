@@ -504,7 +504,7 @@ export default function InternManagement() {
         />
         <input 
           className="input" 
-          placeholder="Tech stack" 
+          placeholder="Tech stack (e.g., Python Full Stack, MERN Stack, Data Science)" 
           value={form.tech_stack} 
           onChange={(e) => { setForm({ ...form, tech_stack: e.target.value }); setError(''); }} 
         />
@@ -537,14 +537,14 @@ export default function InternManagement() {
             name,email,tech_stack,batch_name
           </code>
           <p className="text-xs text-slate-500 mt-2">
-            <span className="font-semibold text-slate-700">Example:</span> John Doe,john@example.com,Full Stack,KF-Cohort-5
+            <span className="font-semibold text-slate-700">Example:</span> John Doe,john@example.com,Python Full Stack,KF-Cohort-5
           </p>
           <div className="mt-3 pt-3 border-t border-slate-300">
             <p className="text-xs font-semibold text-rose-700 mb-1">⚠️ Important:</p>
             <ul className="text-xs text-slate-600 space-y-1 ml-4 list-disc">
               <li><span className="font-semibold">name</span> and <span className="font-semibold">email</span> are required</li>
               <li><span className="font-semibold">batch_name</span> is required</li>
-              <li><span className="font-semibold">tech_stack</span> is optional</li>
+              <li><span className="font-semibold">tech_stack</span> is optional (e.g., "Python Full Stack", "MERN Stack", "Data Science")</li>
               <li>First row must be the header row</li>
             </ul>
           </div>
@@ -690,6 +690,7 @@ export default function InternManagement() {
                       {editingId === item.id ? (
                         <input 
                           className="input" 
+                          placeholder="e.g., Python Full Stack, MERN Stack" 
                           value={editingForm.tech_stack || ''} 
                           onChange={(e) => setEditingForm({ ...editingForm, tech_stack: e.target.value })} 
                         />

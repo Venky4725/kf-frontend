@@ -8,6 +8,27 @@ import RoadmapTaskCard, { isRoadmapTask } from '../../components/RoadmapTaskCard
 const normalizeRole = (role = "") => 
   (role || "").toLowerCase().replace(/[^a-z]/g, "");
 
+// Map normalized roles to filter categories
+const getRoleCategory = (techStack = "") => {
+  const normalized = normalizeRole(techStack);
+  
+  // AI/ML variations
+  if (normalized.includes('ai') || normalized.includes('ml') || 
+      normalized.includes('data') || normalized.includes('science')) {
+    return 'aiml';
+  }
+  
+  // FULLSTACK variations (Python, MERN, Java, etc.)
+  if (normalized.includes('full') || normalized.includes('stack') || 
+      normalized.includes('python') || normalized.includes('mern') || 
+      normalized.includes('java') || normalized.includes('web')) {
+    return 'fullstack';
+  }
+  
+  // Default to general
+  return 'general';
+};
+
 export default function InternDashboard() {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -112,14 +133,15 @@ export default function InternDashboard() {
   const tasks = useMemo(() => {
     const rawTasks = data.tasks || []
     return rawTasks.filter(t => {
-      // THE USER SAYS: USE task.role AS PRIMARY SOURCE
       const taskRole = t.role || t.tech_stack
+      const taskCategory = getRoleCategory(taskRole);
       
-      // If task has no role assigned OR is explicitly GENERAL, it's for everyone in the batch
-      if (!taskRole || normalizeRole(taskRole) === "general") return true
+      // If task has no role assigned OR is GENERAL category, it's for everyone in the batch
+      if (!taskRole || taskCategory === "general") return true
       
-      // Otherwise, must match intern's tech_stack
-      return normalizeRole(taskRole) === normalizeRole(user?.tech_stack)
+      // Otherwise, must match intern's tech_stack category
+      const userCategory = getRoleCategory(user?.tech_stack);
+      return taskCategory === userCategory;
     })
   }, [data.tasks, user?.tech_stack])
 
@@ -132,12 +154,15 @@ export default function InternDashboard() {
     const groups = {}
     roadmapTasks.forEach(task => {
       const rawRole = task.role || task.tech_stack
-      const norm = normalizeRole(rawRole)
+      const category = getRoleCategory(rawRole)
+      
+      // Display role logic: preserve original tech_stack value
       let displayRole = "GENERAL"
-      if (norm && norm !== "general") {
-        displayRole = rawRole?.trim()?.toUpperCase() || "UNSPECIFIED"
+      if (rawRole && category !== "general") {
+        displayRole = rawRole.trim() // Preserve: "Python Full Stack", "MERN Stack", etc.
       }
-      const key = `${task.batch_id}_${norm}`
+      
+      const key = `${task.batch_id}_${category}`
       if (!groups[key]) {
         groups[key] = { batch_id: task.batch_id, role: displayRole, tasks: [] }
       }
